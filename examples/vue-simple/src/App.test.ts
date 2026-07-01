@@ -1,15 +1,15 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/vue";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, test } from "vitest";
 
-import { App, createT } from "./App";
+import App, { createT } from "./App.vue";
 import { en } from "./translations/en";
 
-describe("react-simple example", () => {
+describe("vue-simple example", () => {
   test("switches between nested translation dictionaries", async () => {
     const user = userEvent.setup();
 
-    render(<App />);
+    render(App);
 
     expect(screen.getByRole("heading", { name: "TPath Notes" })).toBeInTheDocument();
     expect(screen.getByLabelText("Note")).toBeInTheDocument();
@@ -24,7 +24,7 @@ describe("react-simple example", () => {
   test("renders translated UI and formats note interpolation", async () => {
     const user = userEvent.setup();
 
-    render(<App initialLocale="en" />);
+    render(App, { props: { initialLocale: "en" } });
 
     expect(screen.getByRole("heading", { name: "TPath Notes" })).toBeInTheDocument();
     expect(screen.getByText("No notes yet")).toBeInTheDocument();
@@ -39,7 +39,7 @@ describe("react-simple example", () => {
   test("toggles debug keys from the same translator proxy", async () => {
     const user = userEvent.setup();
 
-    render(<App initialLocale="en" />);
+    render(App, { props: { initialLocale: "en" } });
 
     expect(screen.getByRole("heading", { name: "TPath Notes" })).toBeInTheDocument();
 
@@ -56,7 +56,7 @@ describe("react-simple example", () => {
   test("renders another nested translation tree with the same inferred type", async () => {
     const user = userEvent.setup();
 
-    render(<App initialLocale="ru" />);
+    render(App, { props: { initialLocale: "ru" } });
 
     expect(screen.getByRole("heading", { name: "Заметки TPath" })).toBeInTheDocument();
     expect(screen.getByText("Пока нет заметок")).toBeInTheDocument();

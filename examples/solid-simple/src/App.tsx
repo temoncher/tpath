@@ -1,5 +1,4 @@
-import { useState } from "react";
-import type { FormEvent } from "react";
+import { For, Show, createSignal } from "solid-js";
 
 import { tpath } from "../../../tpath.ts";
 import { en } from "./translations/en";
@@ -7,10 +6,11 @@ import { ru } from "./translations/ru";
 import type { Messages } from "./translations/types";
 
 type Translations = typeof en;
+type Accessor<T> = () => T;
 
 interface TranslationContext {
-  readonly debug: boolean;
-  readonly messages: Messages<Translations>;
+  readonly debug: Accessor<boolean>;
+  readonly messages: Accessor<Messages<Translations>>;
 }
 
 export const createT = tpath<Translations>()
@@ -23,11 +23,11 @@ export const createT = tpath<Translations>()
     },
   })
   .resolve((keys, ctx) => {
-    if (ctx.debug) {
+    if (ctx.debug()) {
       return keys.join(".");
     }
 
-    return resolveNested(ctx.messages, keys);
+    return resolveNested(ctx.messages(), keys);
   });
 
 const translations = {
@@ -41,23 +41,23 @@ interface AppProps {
   readonly initialLocale?: Locale;
 }
 
-export function App({ initialLocale = "en" }: AppProps = {}) {
-  const [locale, setLocale] = useState<Locale>(initialLocale);
-  const [debug, setDebug] = useState(false);
-  const [notes, setNotes] = useState<readonly string[]>([]);
-  const [text, setText] = useState("");
+export function App(props: AppProps = {}) {
+  const [locale, setLocale] = createSignal<Locale>(props.initialLocale ?? "en");
+  const [debug, setDebug] = createSignal(false);
+  const [notes, setNotes] = createSignal<readonly string[]>([]);
+  const [text, setText] = createSignal("");
   const t = createT({
-    debug: false,
-    messages: translations[locale],
+    debug,
+    messages: () => translations[locale()],
   });
 
   function toggleDebug() {
     setDebug((currentDebug) => !currentDebug);
   }
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  function submit(event: SubmitEvent) {
     event.preventDefault();
-    const nextText = text.trim();
+    const nextText = text().trim();
 
     if (nextText.length === 0) {
       return;
@@ -68,14 +68,14 @@ export function App({ initialLocale = "en" }: AppProps = {}) {
   }
 
   return (
-    <main className="simple-app">
+    <main class="simple-app">
       <header>
         <h1>{t.app.title()}</h1>
-        <div className="header-controls">
+        <div class="header-controls">
           <label>
             {t.app.localeSelect.label()}
             <select
-              value={locale}
+              value={locale()}
               onChange={(event) => {
                 setLocale(event.currentTarget.value as Locale);
               }}
@@ -85,37 +85,31 @@ export function App({ initialLocale = "en" }: AppProps = {}) {
             </select>
           </label>
           <button type="button" onClick={toggleDebug}>
-            {debug ? t.app.debugToggle.hide() : t.app.debugToggle.show()}
+            {debug() ? t.app.debugToggle.hide() : t.app.debugToggle.show()}
           </button>
         </div>
       </header>
 
       <form onSubmit={submit}>
-        <label htmlFor="note">{t.app.form.label()}</label>
+        <label for="note">{t.app.form.label()}</label>
         <input
           id="note"
           placeholder={t.app.form.placeholder.$exists() ? t.app.form.placeholder() : undefined}
-          value={text}
-          onChange={(event) => setText(event.currentTarget.value)}
+          value={text()}
+          onInput={(event) => setText(event.currentTarget.value)}
         />
         <button type="submit">{t.app.form.submit()}</button>
       </form>
 
       <section aria-live="polite">
-        {notes.length === 0 ? (
-          <p>{t.app.notes.empty()}</p>
-        ) : (
-          <>
-            <p>{t.app.notes.count({ count: notes.length })}</p>
-            <ul>
-              {notes.map((note, index) => (
-                <li key={`${note}:${index}`}>
-                  {t.app.notes.item({ index: index + 1, text: note })}
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
+        <Show when={notes().length > 0} fallback={<p>{t.app.notes.empty()}</p>}>
+          <p>{t.app.notes.count({ count: notes().length })}</p>
+          <ul>
+            <For each={notes()}>
+              {(note, index) => <li>{t.app.notes.item({ index: index() + 1, text: note })}</li>}
+            </For>
+          </ul>
+        </Show>
       </section>
     </main>
   );

@@ -216,6 +216,28 @@ pnpm --dir examples/react-simple test
 pnpm --dir examples/react-simple build
 ```
 
+The `examples/solid-simple` app mirrors `react-simple` in a small Solid app scaffolded with Vite.
+It uses the same nested dictionaries, translator context, interpolation, debug-key rendering, and
+opt-in extension.
+
+```sh
+pnpm --dir examples/solid-simple install
+pnpm --dir examples/solid-simple dev
+pnpm --dir examples/solid-simple test
+pnpm --dir examples/solid-simple build
+```
+
+The `examples/vue-simple` app mirrors `react-simple` in a small Vue app scaffolded with Vite.
+It uses the same nested dictionaries, translator context, interpolation, debug-key rendering, and
+opt-in extension.
+
+```sh
+pnpm --dir examples/vue-simple install
+pnpm --dir examples/vue-simple dev
+pnpm --dir examples/vue-simple test
+pnpm --dir examples/vue-simple build
+```
+
 The `examples/react-complex` app shows a heavier GitHub UI with async static JSON translations split
 by namespace, generated nested type fixtures, id-based status labels, `$loading` shimmer text, lazy
 feature routes, and stories.
