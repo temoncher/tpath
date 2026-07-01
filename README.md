@@ -25,9 +25,9 @@ import { tpath } from './tpath';
 
 ## Basic Usage
 
-Describe your translation tree as a TypeScript type, then pass `tpath(...)` a resolver function.
-TPath only collects the path keys. Your resolver decides how those keys map to dictionaries,
-namespaces, locales, remote data, or anything else.
+Describe your translation tree as a TypeScript type, then build a translator factory. TPath only
+collects the path keys. Your resolver decides how those keys map to dictionaries, namespaces,
+locales, remote data, or anything else.
 
 ```ts
 import { tpath } from './tpath';
@@ -46,9 +46,11 @@ const messages = {
   'common.home.greeting': 'Hello, {name}!',
 };
 
-const t = tpath(
-  (keys: tpath.Keys<Translations>) => messages[keys.join('.') as keyof typeof messages],
-);
+const createT = tpath<Translations>()
+  .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
+  .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+
+const t = createT({ messages });
 
 t.common.home.title(); // "Home"
 t.common.home.greeting({ name: 'Ada' }); // "Hello, Ada!"
@@ -63,8 +65,8 @@ t.common.home.title(); // "common.home.title" if the resolver returns undefined
 
 ## Caller-Owned Resolution
 
-The resolver function receives the collected key path as an array. It does not receive a dictionary, and
-TPath does not decide which part of the path is a namespace.
+The resolver function receives the collected key path as an array and the context passed to the
+factory. TPath does not decide which part of the path is a namespace.
 
 ```ts
 const dictionaries = {
@@ -73,15 +75,19 @@ const dictionaries = {
   },
 };
 
-const t = tpath((keys: tpath.Keys<Translations>) => {
-  const [namespace, ...messagePath] = keys;
+const createT = tpath<Translations>()
+  .ctx<{ readonly dictionaries: typeof dictionaries }>()
+  .resolve((keys, ctx) => {
+    const [namespace, ...messagePath] = keys;
 
-  if (namespace === undefined) {
-    return undefined;
-  }
+    if (namespace === undefined) {
+      return undefined;
+    }
 
-  return dictionaries[namespace]?.[messagePath.join('.')];
-});
+    return ctx.dictionaries[namespace]?.[messagePath.join('.')];
+  });
+
+const t = createT({ dictionaries });
 
 t.common.home.title(); // lookup receives ["common", "home", "title"]
 ```
@@ -91,23 +97,28 @@ load by locale, merge several dictionaries, or use a completely different key st
 
 ## Extension Patterns
 
-Extensions are ordinary `$...` functions passed as the second argument. TPath calls them with a
-context first, then forwards the user arguments from the proxy call.
+Extensions are ordinary `$...` functions registered on the builder. TPath calls them with an
+extension context first, then forwards the user arguments from the proxy call.
 
 ```ts
 const loadingKeys = new Set(['common.home.title']);
 
-const t = tpath(
-  (keys: tpath.Keys<Translations>) => messages[keys.join('.') as keyof typeof messages],
-  {
+const createT = tpath<Translations>()
+  .ctx<{
+    readonly loadingKeys: ReadonlySet<string>;
+    readonly messages: Readonly<Record<string, string | undefined>>;
+  }>()
+  .extend({
     $exists({ keys, resolve }, child?: string) {
       return resolve(child === undefined ? keys : [...keys, child]) !== undefined;
     },
-    $loading({ keys }, child?: string) {
-      return loadingKeys.has((child === undefined ? keys : [...keys, child]).join('.'));
+    $loading({ ctx, keys }, child?: string) {
+      return ctx.loadingKeys.has((child === undefined ? keys : [...keys, child]).join('.'));
     },
-  },
-);
+  })
+  .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+
+const t = createT({ loadingKeys, messages });
 
 t.common.home.title.$exists(); // true
 t.common.home.$exists('title'); // true
@@ -117,14 +128,16 @@ t.common.home.title.$loading(); // true
 If you want a dynamic-key escape hatch, provide it as another extension:
 
 ```ts
-const t = tpath(
-  (keys: tpath.Keys<Translations>) => messages[keys.join('.') as keyof typeof messages],
-  {
+const createT = tpath<Translations>()
+  .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
+  .extend({
     $({ keys, translate }, child: string, interpolation?: object) {
       return translate([...keys, child], interpolation);
     },
-  },
-);
+  })
+  .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+
+const t = createT({ messages });
 
 t.common.$('home.greeting', { name: 'Ada' }); // "Hello, Ada!"
 ```
@@ -132,24 +145,26 @@ t.common.$('home.greeting', { name: 'Ada' }); // "Hello, Ada!"
 TPath does not include built-in `$` or `$exists` methods. If an extension is not provided, it is not
 part of the typed proxy.
 
-The resolver and extensions receive the options object passed as the third argument:
+The resolver and extensions receive the same context object passed to the factory:
 
 ```ts
-const t = tpath(
-  (keys: tpath.Keys<Translations>, options) => {
-    if (options.debug()) return keys.join('.');
+const createT = tpath<Translations>()
+  .ctx<{
+    readonly debug: boolean;
+    readonly locale: string;
+    readonly messages: Readonly<Record<string, string | undefined>>;
+  }>()
+  .extend({
+    $locale: ({ ctx }) => ctx.locale,
+    $debug: ({ ctx }) => ctx.debug,
+  })
+  .resolve((keys, ctx) => {
+    if (ctx.debug) return keys.join('.');
 
-    return messages[keys.join('.') as keyof typeof messages];
-  },
-  {
-    $locale: ({ options }) => options.locale,
-    $debug: ({ options }) => options.debug?.() ?? false,
-  },
-  {
-    debug: () => false,
-    locale: 'en',
-  },
-);
+    return ctx.messages[keys.join('.')];
+  });
+
+const t = createT({ debug: false, locale: 'en', messages });
 
 t.common.home.title.$locale(); // "en"
 ```
@@ -160,17 +175,18 @@ TPath does not have built-in debug behavior. If you want every call to return th
 that part of your resolver policy:
 
 ```ts
-const t = tpath(
-  (keys: tpath.Keys<Translations>, options) => {
-    if (options.debug()) return keys.join('.');
+const createT = tpath<Translations>()
+  .ctx<{
+    readonly debug: boolean;
+    readonly messages: Readonly<Record<string, string | undefined>>;
+  }>()
+  .resolve((keys, ctx) => {
+    if (ctx.debug) return keys.join('.');
 
-    return messages[keys.join('.') as keyof typeof messages];
-  },
-  {},
-  {
-    debug: () => true,
-  },
-);
+    return ctx.messages[keys.join('.')];
+  });
+
+const t = createT({ debug: true, messages });
 
 t.common.home.title(); // "common.home.title"
 ```
@@ -186,6 +202,18 @@ pnpm test:types
 pnpm typecheck
 pnpm lint
 pnpm format
+```
+
+## Examples
+
+The `examples/react-simple` app shows the builder API in a small React app with typed paths,
+context-bound messages, interpolation, debug-key rendering, and an opt-in extension.
+
+```sh
+pnpm --dir examples/react-simple install
+pnpm --dir examples/react-simple dev
+pnpm --dir examples/react-simple test
+pnpm --dir examples/react-simple build
 ```
 
 The package is marked `"private": true` because TPath is intended to be copied, not published.

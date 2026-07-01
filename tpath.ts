@@ -1,45 +1,20 @@
 import { IntlMessageFormat } from 'intl-messageformat';
 
 /**
- * Creates a typed translation path proxy.
+ * Creates a typed translation path builder.
  *
  * ```ts
  * const messages = { 'common.home.title': 'Home' };
- * const t = tpath((keys: tpath.Keys<{ common: { home: { title: 'Home' } } }>) => {
- *     return messages[keys.join('.')];
- * });
+ * const createT = tpath<{ common: { home: { title: 'Home' } } }>()
+ *     .ctx<{ messages: typeof messages }>()
+ *     .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+ * const t = createT({ messages });
  *
  * t.common.home.title(); // "Home"
  * ```
  */
-export function tpath<TNamespace>(
-  resolveValue: (keys: tpath.Keys<TNamespace>, options: tpath.Options) => string | undefined,
-): tpath.Proxy<TNamespace, {}>;
-export function tpath<
-  TNamespace,
-  TOptions extends object,
-  TExtensions extends tpath.ExtensionMap<TOptions>,
->(
-  resolveValue: (
-    keys: tpath.Keys<TNamespace>,
-    options: tpath.Options<TOptions>,
-  ) => string | undefined,
-  extensions: TExtensions,
-  options?: tpath.Options<TOptions>,
-): tpath.Proxy<TNamespace, TExtensions>;
-export function tpath<
-  TNamespace,
-  TOptions extends object,
-  TExtensions extends tpath.ExtensionMap<TOptions>,
->(
-  resolveValue: (
-    keys: tpath.Keys<TNamespace>,
-    options: tpath.Options<TOptions>,
-  ) => string | undefined,
-  extensions = {} as TExtensions,
-  options = {} as tpath.Options<TOptions>,
-): tpath.Proxy<TNamespace, TExtensions> {
-  return createTPathProxy<TNamespace, TOptions, TExtensions>(resolveValue, extensions, [], options);
+export function tpath<TNamespace>(): tpath.Builder<TNamespace> {
+  return createTPathBuilder<TNamespace, {}, {}>({});
 }
 
 /**
@@ -50,23 +25,45 @@ export namespace tpath {
     readonly [__tpathKeysTypes]: TNamespace;
   };
 
-  export type Options<TUserOptions extends object = {}> = Readonly<TUserOptions>;
+  export type Context<TUserContext extends object = {}> = Readonly<TUserContext>;
 
-  export interface ExtensionContext<TOptions extends object = {}> {
+  export interface ExtensionContext<TContext extends object = {}> {
+    readonly ctx: Context<TContext>;
     readonly keys: readonly string[];
-    readonly options: Options<TOptions>;
     readonly resolve: (keys: readonly string[]) => string | undefined;
     readonly translate: (keys: readonly string[], interpolation?: object) => string;
   }
 
-  export type ExtensionMap<TOptions extends object = {}> = Readonly<
-    Record<`$${string}`, (context: ExtensionContext<TOptions>, ...args: any[]) => unknown>
+  export type ExtensionMap<TContext extends object = {}> = Readonly<
+    Record<`$${string}`, (context: ExtensionContext<TContext>, ...args: any[]) => unknown>
   >;
 
-  export type Proxy<TNamespace, TExtensions extends ExtensionMap<any>> = TProxy<
+  export type TPath<TNamespace, TExtensions extends ExtensionMap<any>> = TProxy<
     TNamespace,
     TExtensions
   >;
+
+  export interface Builder<
+    TNamespace,
+    TContext extends object = {},
+    TExtensions extends ExtensionMap<any> = {},
+  > {
+    ctx<TNextContext extends object>(): Builder<TNamespace, TNextContext, TExtensions>;
+    extend<TNextExtensions extends ExtensionMap<TContext>>(
+      extensions: TNextExtensions,
+    ): Builder<TNamespace, TContext, TExtensions & TNextExtensions>;
+    resolve(
+      resolveValue: (keys: Keys<TNamespace>, ctx: Context<TContext>) => string | undefined,
+    ): Factory<TNamespace, TContext, TExtensions>;
+  }
+
+  export type Factory<
+    TNamespace,
+    TContext extends object,
+    TExtensions extends ExtensionMap<any>,
+  > = keyof TContext extends never
+    ? (ctx?: never) => TPath<TNamespace, TExtensions>
+    : (ctx: Context<TContext>) => TPath<TNamespace, TExtensions>;
 
   export type PickNs<TNamespaces, Ns> = Ns extends
     | [infer F extends keyof TNamespaces, ...infer R]
@@ -170,21 +167,45 @@ type TProxy<
 // key is ever written to key arrays.
 declare const __tpathKeysTypes: unique symbol;
 
+function createTPathBuilder<
+  TNamespace,
+  TContext extends object,
+  TExtensions extends tpath.ExtensionMap<any>,
+>(extensions: TExtensions): tpath.Builder<TNamespace, TContext, TExtensions> {
+  return {
+    ctx<TNextContext extends object>() {
+      return createTPathBuilder<TNamespace, TNextContext, TExtensions>(extensions);
+    },
+    extend<TNextExtensions extends tpath.ExtensionMap<TContext>>(nextExtensions: TNextExtensions) {
+      return createTPathBuilder<TNamespace, TContext, TExtensions & TNextExtensions>({
+        ...extensions,
+        ...nextExtensions,
+      });
+    },
+    resolve(resolveValue) {
+      return ((ctx = {} as tpath.Context<TContext>) =>
+        createTPathProxy<TNamespace, TContext, TExtensions>(
+          resolveValue,
+          extensions,
+          [],
+          ctx,
+        )) as tpath.Factory<TNamespace, TContext, TExtensions>;
+    },
+  };
+}
+
 function createTPathProxy<
   TNamespace,
-  TOptions extends object,
-  TExtensions extends tpath.ExtensionMap<TOptions>,
+  TContext extends object,
+  TExtensions extends tpath.ExtensionMap<any>,
 >(
-  resolveValue: (
-    keys: tpath.Keys<TNamespace>,
-    options: tpath.Options<TOptions>,
-  ) => string | undefined,
+  resolveValue: (keys: tpath.Keys<TNamespace>, ctx: tpath.Context<TContext>) => string | undefined,
   extensions: TExtensions,
   previousPath: readonly string[],
-  options: tpath.Options<TOptions>,
-): tpath.Proxy<TNamespace, TExtensions> {
+  ctx: tpath.Context<TContext>,
+): tpath.TPath<TNamespace, TExtensions> {
   function resolve(keys: readonly string[]) {
-    return resolveValue(keys as tpath.Keys<TNamespace>, options);
+    return resolveValue(keys as tpath.Keys<TNamespace>, ctx);
   }
 
   function translate(keys: readonly string[], interpolation?: object) {
@@ -218,7 +239,7 @@ function createTPathProxy<
         extensions as Readonly<
           Record<
             string,
-            ((context: tpath.ExtensionContext<TOptions>, ...args: unknown[]) => unknown) | undefined
+            ((context: tpath.ExtensionContext<TContext>, ...args: unknown[]) => unknown) | undefined
           >
         >
       )[key];
@@ -227,8 +248,8 @@ function createTPathProxy<
         return (...args: unknown[]) =>
           extension(
             {
+              ctx,
               keys: previousPath,
-              options,
               resolve,
               translate,
             },
@@ -236,10 +257,10 @@ function createTPathProxy<
           );
       }
 
-      return createTPathProxy(resolveValue, extensions, [...previousPath, key], options);
+      return createTPathProxy(resolveValue, extensions, [...previousPath, key], ctx);
     },
     apply(_target, _thisArg, argArray: unknown[]) {
       return translate(previousPath, argArray[0] as object | undefined);
     },
-  }) as unknown as tpath.Proxy<TNamespace, TExtensions>;
+  }) as unknown as tpath.TPath<TNamespace, TExtensions>;
 }

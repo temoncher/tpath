@@ -29,13 +29,13 @@ function appendKey(keys: readonly string[], child: string | undefined): readonly
 
 function resolveWithDebug(
   keys: tpath.Keys<Translations>,
-  options: { readonly debug: () => boolean },
+  ctx: { readonly debug: boolean; readonly messages: Readonly<Record<string, string | undefined>> },
 ): string {
-  if (options.debug()) {
+  if (ctx.debug) {
     return keys.join('.');
   }
 
-  return 'Home';
+  return ctx.messages[keys.join('.')] ?? 'Home';
 }
 
 describe('tpath', () => {
@@ -49,14 +49,29 @@ describe('tpath', () => {
       'common.home.title': 'Home',
     };
 
-    const t = tpath((keys: tpath.Keys<Translations>) => {
-      requestedKeys.push([...keys]);
+    const createT = tpath<Translations>()
+      .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
+      .resolve((keys, ctx) => {
+        requestedKeys.push([...keys]);
 
-      return messages[keys.join('.') as keyof typeof messages];
-    });
+        return ctx.messages[keys.join('.')];
+      });
+    const t = createT({ messages });
 
     expect(t.common.home.title()).toBe('Home');
     expect(requestedKeys).toEqual([['common', 'home', 'title']]);
+  });
+
+  test('binds translation context when creating a proxy', () => {
+    const createT = tpath<Translations>()
+      .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
+      .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+
+    const en = createT({ messages: { 'common.home.title': 'Home' } });
+    const alternate = createT({ messages: { 'common.home.title': 'Start' } });
+
+    expect(en.common.home.title()).toBe('Home');
+    expect(alternate.common.home.title()).toBe('Start');
   });
 
   test('formats ICU interpolation values', () => {
@@ -65,9 +80,9 @@ describe('tpath', () => {
       'common.home.score': '{name} has {score, number} points',
       'admin.users.count': '{count, plural, one {# user} other {# users}}',
     };
-    const t = tpath(
-      (keys: tpath.Keys<Translations>) => translations[keys.join('.') as keyof typeof translations],
-    );
+    const t = tpath<Translations>()
+      .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
+      .resolve((keys, ctx) => ctx.messages[keys.join('.')])({ messages: translations });
 
     expect(t.common.home.greeting({ name: 'Ada' })).toBe('Hello, Ada!');
     expect(t.common.home.score({ name: 'Ada', score: 7 })).toBe('Ada has 7 points');
@@ -78,14 +93,14 @@ describe('tpath', () => {
     const translations = {
       'common.home.greeting': 'Hello, {name}!',
     };
-    const t = tpath(
-      (keys: tpath.Keys<Translations>) => translations[keys.join('.') as keyof typeof translations],
-      {
+    const t = tpath<Translations>()
+      .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
+      .extend({
         $({ keys, translate }, child: string, interpolation?: object) {
           return translate([...keys, child], interpolation);
         },
-      },
-    );
+      })
+      .resolve((keys, ctx) => ctx.messages[keys.join('.')])({ messages: translations });
 
     expect(t.common.$('home.greeting', { name: 'Ada' })).toBe('Hello, Ada!');
   });
@@ -96,17 +111,23 @@ describe('tpath', () => {
       'common.home.title': 'Home',
     };
     const loadingKeys = new Set(['common.home.title']);
-    const t = tpath(
-      (keys: tpath.Keys<Translations>) => translations[keys.join('.') as keyof typeof translations],
-      {
+    const t = tpath<Translations>()
+      .ctx<{
+        readonly loadingKeys: ReadonlySet<string>;
+        readonly messages: Readonly<Record<string, string | undefined>>;
+      }>()
+      .extend({
         $exists({ keys, resolve }, child?: string) {
           return resolve(appendKey(keys, child)) !== undefined;
         },
-        $loading({ keys }, child?: string) {
-          return loadingKeys.has(appendKey(keys, child).join('.'));
+        $loading({ ctx, keys }, child?: string) {
+          return ctx.loadingKeys.has(appendKey(keys, child).join('.'));
         },
-      },
-    );
+      })
+      .resolve((keys, ctx) => ctx.messages[keys.join('.')])({
+      loadingKeys,
+      messages: translations,
+    });
 
     expect(t.common.home.empty.$exists()).toBe(true);
     expect(t.common.home.missing.$exists()).toBe(false);
@@ -114,39 +135,51 @@ describe('tpath', () => {
     expect(t.common.home.$loading('title')).toBe(true);
   });
 
-  test('passes user options into extension context', () => {
-    const t = tpath(
-      (_keys: tpath.Keys<Translations>) => 'Home',
-      {
-        $locale({ options }) {
-          return options.locale;
+  test('passes bound context into extension context', () => {
+    const t = tpath<Translations>()
+      .ctx<{
+        readonly debug: boolean;
+        readonly locale: string;
+      }>()
+      .extend({
+        $locale({ ctx }) {
+          return ctx.locale;
         },
-        $debug({ options }) {
-          return options.debug();
+        $debug({ ctx }) {
+          return ctx.debug;
         },
-      },
-      {
-        debug: () => true,
-        locale: 'en',
-      },
-    );
+      })
+      .resolve(() => 'Home')({
+      debug: true,
+      locale: 'en',
+    });
 
     expect(t.common.home.title.$locale()).toBe('en');
     expect(t.common.home.title.$debug()).toBe(true);
   });
 
   test('falls back to the joined key when a translation is missing', () => {
-    const t = tpath((_keys: tpath.Keys<Translations>) => undefined);
+    const t = tpath<Translations>().resolve(() => undefined)();
 
     expect(t.common.home.title()).toBe('common.home.title');
   });
 
-  test('lets the resolver implement debug mode from options', () => {
-    const resolver =
-      vi.fn<(keys: tpath.Keys<Translations>, options: { readonly debug: () => boolean }) => string>(
-        resolveWithDebug,
-      );
-    const t = tpath(resolver, {}, { debug: () => true });
+  test('lets the resolver implement debug mode from context', () => {
+    const resolver = vi.fn<
+      (
+        keys: tpath.Keys<Translations>,
+        ctx: {
+          readonly debug: boolean;
+          readonly messages: Readonly<Record<string, string | undefined>>;
+        },
+      ) => string
+    >(resolveWithDebug);
+    const t = tpath<Translations>()
+      .ctx<{
+        readonly debug: boolean;
+        readonly messages: Readonly<Record<string, string | undefined>>;
+      }>()
+      .resolve(resolver)({ debug: true, messages: {} });
 
     expect(t.common.home.title()).toBe('common.home.title');
     expect(resolver).toHaveBeenCalledTimes(1);
@@ -154,14 +187,14 @@ describe('tpath', () => {
 
   test('reports ICU format errors and falls back to the joined key', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const t = tpath((_keys: tpath.Keys<Translations>) => 'Hello, {name');
+    const t = tpath<Translations>().resolve(() => 'Hello, {name')();
 
     expect(t.common.home.greeting({ name: 'Ada' })).toBe('common.home.greeting');
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('ICU formatting error:'));
   });
 
   test('rejects symbol path keys', () => {
-    const t = tpath((_keys: tpath.Keys<Translations>) => undefined);
+    const t = tpath<Translations>().resolve(() => undefined)();
 
     expect(() => {
       Reflect.get(t, Symbol('bad'));

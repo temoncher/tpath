@@ -1,7 +1,7 @@
 import { defineConfig } from 'oxlint';
 
 export default defineConfig({
-  ignorePatterns: ['node_modules/**'],
+  ignorePatterns: ['examples/**', 'node_modules/**'],
   plugins: ['eslint', 'typescript', 'unicorn', 'oxc', 'import', 'jsdoc', 'promise', 'vitest'],
   categories: {
     correctness: 'error',

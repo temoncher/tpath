@@ -27,21 +27,20 @@ function appendKey(keys: readonly string[], child: string | undefined): readonly
 
 function resolveWithDebug(
   keys: tpath.Keys<Translations>,
-  options: {
-    readonly debug: () => boolean;
-    readonly locale: string;
-    readonly strict: boolean;
+  ctx: {
+    readonly debug: boolean;
+    readonly messages: Readonly<Record<string, string | undefined>>;
   },
 ): string {
-  if (options.debug()) {
+  if (ctx.debug) {
     return keys.join('.');
   }
 
-  return 'value';
+  return ctx.messages[keys.join('.')] ?? 'value';
 }
 
 test('types nested translation paths', () => {
-  const t = tpath((_keys: tpath.Keys<Translations>) => 'value');
+  const t = tpath<Translations>().resolve(() => 'value')();
 
   assertType<string>(t.common.home.title());
   assertType<string>(t.common.home.greeting({ name: 'Ada' }));
@@ -56,7 +55,7 @@ test('types nested translation paths', () => {
 });
 
 test('requires interpolation only for messages that declare it', () => {
-  const t = tpath((_keys: tpath.Keys<Translations>) => 'value');
+  const t = tpath<Translations>().resolve(() => 'value')();
 
   t.common.home.title();
 
@@ -73,29 +72,72 @@ test('requires interpolation only for messages that declare it', () => {
   t.common.home.greeting({ name: true });
 });
 
-test('types extension context and public extension arguments', () => {
-  const t = tpath(
-    (keys: tpath.Keys<Translations>) => {
-      expectTypeOf(keys).toEqualTypeOf<tpath.Keys<Translations>>();
+test('does not accept context when no context type is declared', () => {
+  const createT = tpath<Translations>().resolve(() => 'value');
+  const t = createT();
 
-      return 'value';
+  assertType<string>(t.common.home.title());
+
+  // @ts-expect-error no context argument is accepted without .ctx()
+  createT({});
+});
+
+test('types resolver context and factory argument', () => {
+  const createT = tpath<Translations>()
+    .ctx<{
+      readonly debug: boolean;
+      readonly messages: Readonly<Record<string, string | undefined>>;
+    }>()
+    .resolve((keys, ctx) => {
+      expectTypeOf(keys).toEqualTypeOf<tpath.Keys<Translations>>();
+      assertType<boolean>(ctx.debug);
+      expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
+
+      return ctx.messages[keys.join('.')];
+    });
+
+  const t = createT({
+    debug: false,
+    messages: {
+      'common.home.title': 'Home',
     },
-    {
+  });
+
+  assertType<string>(t.common.home.title());
+
+  // @ts-expect-error factory requires the declared context
+  createT();
+
+  // @ts-expect-error missing context property
+  createT({ debug: false });
+});
+
+test('types extension context and public extension arguments', () => {
+  const t = tpath<Translations>()
+    .ctx<{
+      readonly loadingKeys: ReadonlySet<string>;
+      readonly messages: Readonly<Record<string, string | undefined>>;
+    }>()
+    .extend({
       $exists({ keys, resolve }, child?: string) {
         expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
         expectTypeOf(resolve).toEqualTypeOf<(keys: readonly string[]) => string | undefined>();
 
         return resolve(appendKey(keys, child)) !== undefined;
       },
-      $loading({ keys }, child: string, priority?: number) {
+      $loading({ ctx, keys }, child: string, priority?: number) {
         assertType<readonly string[]>(keys);
+        expectTypeOf(ctx.loadingKeys).toEqualTypeOf<ReadonlySet<string>>();
         assertType<string>(child);
         assertType<number | undefined>(priority);
 
         return true;
       },
-    },
-  );
+    })
+    .resolve((keys, ctx) => ctx.messages[keys.join('.')])({
+    loadingKeys: new Set(),
+    messages: {},
+  });
 
   assertType<boolean>(t.common.home.title.$exists());
   assertType<boolean>(t.common.home.$exists('title'));
@@ -112,36 +154,41 @@ test('types extension context and public extension arguments', () => {
   t.common.home.$loading('title', 'high');
 });
 
-test('types user options in extension context', () => {
-  const t = tpath(
-    (_keys: tpath.Keys<Translations>, options) => {
-      assertType<() => boolean>(options.debug);
-      assertType<string>(options.locale);
-      assertType<boolean>(options.strict);
+test('types shared context in resolver and extension context', () => {
+  const t = tpath<Translations>()
+    .ctx<{
+      readonly debug: boolean;
+      readonly locale: string;
+      readonly messages: Readonly<Record<string, string | undefined>>;
+      readonly strict: boolean;
+    }>()
+    .extend({
+      $locale({ ctx }) {
+        assertType<boolean>(ctx.debug);
+        assertType<string>(ctx.locale);
+        assertType<boolean>(ctx.strict);
 
-      return resolveWithDebug(_keys, options);
-    },
-    {
-      $locale({ options }) {
-        assertType<() => boolean>(options.debug);
-        assertType<string>(options.locale);
-        assertType<boolean>(options.strict);
-
-        return options.locale;
+        return ctx.locale;
       },
-      $strict({ options }, expected: boolean) {
-        assertType<boolean>(options.strict);
+      $strict({ ctx }, expected: boolean) {
+        assertType<boolean>(ctx.strict);
         assertType<boolean>(expected);
 
-        return options.strict === expected;
+        return ctx.strict === expected;
       },
-    },
-    {
-      debug: () => true,
-      locale: 'en',
-      strict: true,
-    },
-  );
+    })
+    .resolve((keys, ctx) => {
+      assertType<boolean>(ctx.debug);
+      assertType<string>(ctx.locale);
+      assertType<boolean>(ctx.strict);
+
+      return resolveWithDebug(keys, ctx);
+    })({
+    debug: true,
+    locale: 'en',
+    messages: {},
+    strict: true,
+  });
 
   assertType<string>(t.common.home.title.$locale());
   assertType<boolean>(t.common.home.title.$strict(true));
@@ -151,7 +198,7 @@ test('types user options in extension context', () => {
 });
 
 test('does not expose extensions that were not provided', () => {
-  const t = tpath((_keys: tpath.Keys<Translations>) => 'value');
+  const t = tpath<Translations>().resolve(() => 'value')();
 
   // @ts-expect-error $exists is not built in
   t.common.home.title.$exists();
