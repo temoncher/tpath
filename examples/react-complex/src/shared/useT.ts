@@ -37,6 +37,7 @@ export function useT(
         },
         {
           errorNamespaces: new Map<TranslationNamespace, string>(),
+          locale,
           loadingNamespaces: new Set<TranslationNamespace>(),
           messages: {} as TranslationMessages,
         },

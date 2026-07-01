@@ -1,5 +1,3 @@
-import { IntlMessageFormat } from 'intl-messageformat';
-
 /**
  * Creates a typed translation path builder.
  *
@@ -7,7 +5,7 @@ import { IntlMessageFormat } from 'intl-messageformat';
  * const messages = { 'common.home.title': 'Home' };
  * const createT = tpath<{ common: { home: { title: 'Home' } } }>()
  *     .ctx<{ messages: typeof messages }>()
- *     .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+ *     .format(({ keys, ctx }) => ctx.messages[keys.join('.')]);
  * const t = createT({ messages });
  *
  * t.common.home.title(); // "Home"
@@ -25,10 +23,20 @@ export namespace tpath {
 
   export interface ExtensionContext<TContext extends object = {}> {
     readonly ctx: Context<TContext>;
+    readonly format: (keys: readonly string[], interpolation?: object) => string;
     readonly keys: readonly string[];
-    readonly resolve: (keys: readonly string[]) => string | undefined;
-    readonly translate: (keys: readonly string[], interpolation?: object) => string;
   }
+
+  export interface FormatContext<TContext extends object = {}> {
+    readonly ctx: Context<TContext>;
+    readonly interpolation: object | undefined;
+    readonly key: string;
+    readonly keys: readonly string[];
+  }
+
+  export type FormatMessage<TContext extends object = {}> = (
+    context: FormatContext<TContext>,
+  ) => string | undefined;
 
   export type ExtensionMap<TContext extends object = {}> = Readonly<
     Record<`$${string}`, (context: ExtensionContext<TContext>, ...args: any[]) => unknown>
@@ -48,9 +56,7 @@ export namespace tpath {
     extend<TNextExtensions extends ExtensionMap<TContext>>(
       extensions: TNextExtensions,
     ): Builder<TNamespace, TContext, TExtensions & TNextExtensions>;
-    resolve(
-      resolveValue: (keys: readonly string[], ctx: Context<TContext>) => string | undefined,
-    ): Factory<TNamespace, TContext, TExtensions>;
+    format(formatMessage: FormatMessage<TContext>): Factory<TNamespace, TContext, TExtensions>;
   }
 
   export type Factory<
@@ -174,10 +180,10 @@ function createTPathBuilder<
         ...nextExtensions,
       });
     },
-    resolve(resolveValue) {
+    format(formatMessage) {
       return ((ctx = {} as tpath.Context<TContext>) =>
         createTPathProxy<TNamespace, TContext, TExtensions>(
-          resolveValue,
+          formatMessage,
           extensions,
           [],
           ctx,
@@ -191,29 +197,25 @@ function createTPathProxy<
   TContext extends object,
   TExtensions extends tpath.ExtensionMap<any>,
 >(
-  resolveValue: (keys: readonly string[], ctx: tpath.Context<TContext>) => string | undefined,
+  formatMessage: tpath.FormatMessage<TContext>,
   extensions: TExtensions,
   previousPath: readonly string[],
   ctx: tpath.Context<TContext>,
 ): tpath.TPath<TNamespace, TExtensions> {
-  function resolve(keys: readonly string[]) {
-    return resolveValue(keys, ctx);
-  }
-
-  function translate(keys: readonly string[], interpolation?: object) {
+  function format(keys: readonly string[], interpolation?: object) {
     const key = keys.join('.');
-    const translation = resolve(keys);
-
-    if (translation === undefined) {
-      return key;
-    }
 
     try {
-      return new IntlMessageFormat(translation, undefined, undefined, { ignoreTag: true }).format(
-        interpolation as any,
-      ) as string;
+      const formatted = formatMessage({
+        ctx,
+        interpolation,
+        key,
+        keys,
+      });
+
+      return formatted ?? key;
     } catch (error) {
-      console.error(`ICU formatting error: ${String(error)}`);
+      console.error(`Message formatting error: ${String(error)}`);
 
       return key;
     }
@@ -241,18 +243,17 @@ function createTPathProxy<
           extension(
             {
               ctx,
+              format,
               keys: previousPath,
-              resolve,
-              translate,
             },
             ...args,
           );
       }
 
-      return createTPathProxy(resolveValue, extensions, [...previousPath, key], ctx);
+      return createTPathProxy(formatMessage, extensions, [...previousPath, key], ctx);
     },
     apply(_target, _thisArg, argArray: unknown[]) {
-      return translate(previousPath, argArray[0] as object | undefined);
+      return format(previousPath, argArray[0] as object | undefined);
     },
   }) as unknown as tpath.TPath<TNamespace, TExtensions>;
 }

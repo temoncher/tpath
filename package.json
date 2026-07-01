@@ -21,9 +21,6 @@
     "test:types": "vitest run --typecheck",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
-  "dependencies": {
-    "intl-messageformat": "^10.7.18"
-  },
   "devDependencies": {
     "oxfmt": "^0.52.0",
     "oxlint": "^1.67.0",

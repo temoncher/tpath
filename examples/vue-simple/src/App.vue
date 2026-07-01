@@ -1,4 +1,5 @@
 <script lang="ts">
+import { IntlMessageFormat } from "intl-messageformat";
 import { tpath } from "../../../tpath.ts";
 import { en } from "./translations/en";
 import { ru } from "./translations/ru";
@@ -9,24 +10,33 @@ type Accessor<T> = () => T;
 
 interface TranslationContext {
   readonly debug: Accessor<boolean>;
+  readonly locale: Accessor<string>;
   readonly messages: Accessor<Messages<Translations>>;
 }
 
 export const createT = tpath<Translations>()
   .ctx<TranslationContext>()
   .extend({
-    $exists({ keys, resolve }, child?: string) {
+    $exists({ ctx, keys }, child?: string) {
       const nextKeys = child === undefined ? keys : [...keys, child];
 
-      return resolve(nextKeys) !== undefined;
+      return resolveNested(ctx.messages(), nextKeys) !== undefined;
     },
   })
-  .resolve((keys, ctx) => {
+  .format(({ ctx, interpolation, keys }) => {
     if (ctx.debug()) {
       return keys.join(".");
     }
 
-    return resolveNested(ctx.messages(), keys);
+    const message = resolveNested(ctx.messages(), keys);
+
+    if (message === undefined) {
+      return undefined;
+    }
+
+    return new IntlMessageFormat(message, ctx.locale(), undefined, { ignoreTag: true }).format(
+      interpolation as any,
+    ) as string;
   });
 
 const translations = {
@@ -77,6 +87,7 @@ const notes = ref<readonly string[]>([]);
 const text = ref("");
 const t = createT({
   debug: () => debug.value,
+  locale: () => locale.value,
   messages: () => translations[locale.value],
 });
 

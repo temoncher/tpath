@@ -5,19 +5,13 @@ runtime machinery.
 
 It is intentionally small enough to copy into a project. There is no npm package to install and no
 published package workflow in this repository. Copy [`tpath.ts`](./tpath.ts) into your source tree,
-install `intl-messageformat`, import it from a local path, and keep the copy close to the application
-code that uses it.
+import it from a local path, and keep the copy close to the application code that uses it.
 
 ## Copy Into A Project
 
 1. Copy `tpath.ts` into your project, for example `src/tpath.ts`.
-2. Install `intl-messageformat`.
-3. Import it with a local path.
-4. Commit the copied file with your project.
-
-```sh
-pnpm add intl-messageformat
-```
+2. Import it with a local path.
+3. Commit the copied file with your project.
 
 ```ts
 import { tpath } from './tpath';
@@ -25,9 +19,9 @@ import { tpath } from './tpath';
 
 ## Basic Usage
 
-Describe your translation tree as a TypeScript type, then build a translator factory. TPath only
-collects the path keys. Your resolver decides how those keys map to dictionaries, namespaces,
-locales, remote data, or anything else.
+Describe your translation tree as a TypeScript type, then build a translator factory. TPath collects
+the path keys and calls your formatter. Your formatter decides how those keys map to dictionaries,
+namespaces, locales, remote data, parsing libraries, or anything else.
 
 ```ts
 import { tpath } from './tpath';
@@ -48,11 +42,52 @@ const messages = {
 
 const createT = tpath<Translations>()
   .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
-  .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+  .format(({ ctx, keys }) => ctx.messages[keys.join('.')]);
 
 const t = createT({ messages });
 
 t.common.home.title(); // "Home"
+t.common.home.greeting({ name: 'Ada' }); // "Hello, {name}!"
+```
+
+The `.format(...)` callback is required. TPath does not parse messages at runtime by itself.
+Interpolation types are still inferred from ICU MessageFormat-shaped string literals. The type-level
+parser is designed around the
+[ICU message format](https://unicode-org.github.io/icu/userguide/format_parse/messages/?utm_source=chatgpt.com),
+but runtime parsing is deliberately caller-owned.
+
+If you want ICU formatting with `intl-messageformat`, call it inside `.format(...)`:
+
+```sh
+pnpm add intl-messageformat
+```
+
+```ts
+import { IntlMessageFormat } from 'intl-messageformat';
+import { tpath } from './tpath';
+
+const createT = tpath<Translations>()
+  .ctx<{
+    readonly locale: string;
+    readonly messages: Readonly<Record<string, string | undefined>>;
+  }>()
+  .format(({ ctx, interpolation, keys }) => {
+    const message = ctx.messages[keys.join('.')];
+
+    if (message === undefined) {
+      return undefined;
+    }
+
+    return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
+      interpolation as any,
+    ) as string;
+  });
+
+const t = createT({
+  locale: 'en',
+  messages,
+});
+
 t.common.home.greeting({ name: 'Ada' }); // "Hello, Ada!"
 ```
 
@@ -60,13 +95,13 @@ Missing translations fall back to the joined key:
 
 ```ts
 t.common.home.missing(); // TypeScript error
-t.common.home.title(); // "common.home.title" if the resolver returns undefined
+t.common.home.title(); // "common.home.title" if format returns undefined
 ```
 
-## Caller-Owned Resolution
+## Caller-Owned Formatting
 
-The resolver function receives the collected key path as an array and the context passed to the
-factory. TPath does not decide which part of the path is a namespace.
+The formatter receives the collected key path as an array and the context passed to the factory.
+TPath does not decide which part of the path is a namespace.
 
 ```ts
 const dictionaries = {
@@ -77,7 +112,7 @@ const dictionaries = {
 
 const createT = tpath<Translations>()
   .ctx<{ readonly dictionaries: typeof dictionaries }>()
-  .resolve((keys, ctx) => {
+  .format(({ ctx, keys }) => {
     const [namespace, ...messagePath] = keys;
 
     if (namespace === undefined) {
@@ -109,14 +144,14 @@ const createT = tpath<Translations>()
     readonly messages: Readonly<Record<string, string | undefined>>;
   }>()
   .extend({
-    $exists({ keys, resolve }, child?: string) {
-      return resolve(child === undefined ? keys : [...keys, child]) !== undefined;
+    $exists({ ctx, keys }, child?: string) {
+      return ctx.messages[(child === undefined ? keys : [...keys, child]).join('.')] !== undefined;
     },
     $loading({ ctx, keys }, child?: string) {
       return ctx.loadingKeys.has((child === undefined ? keys : [...keys, child]).join('.'));
     },
   })
-  .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+  .format(({ ctx, keys }) => ctx.messages[keys.join('.')]);
 
 const t = createT({ loadingKeys, messages });
 
@@ -131,11 +166,16 @@ If you want a dynamic-key escape hatch, provide it as another extension:
 const createT = tpath<Translations>()
   .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
   .extend({
-    $({ keys, translate }, child: string, interpolation?: object) {
-      return translate([...keys, child], interpolation);
+    $({ format, keys }, child: string, interpolation?: object) {
+      return format([...keys, child], interpolation);
     },
   })
-  .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+  .format(({ ctx, interpolation, keys }) => {
+    const message = ctx.messages[keys.join('.')];
+    const values = interpolation as { readonly name: string };
+
+    return message?.replace('{name}', values.name);
+  });
 
 const t = createT({ messages });
 
@@ -145,7 +185,7 @@ t.common.$('home.greeting', { name: 'Ada' }); // "Hello, Ada!"
 TPath does not include built-in `$` or `$exists` methods. If an extension is not provided, it is not
 part of the typed proxy.
 
-The resolver and extensions receive the same context object passed to the factory:
+The formatter and extensions receive the same context object passed to the factory:
 
 ```ts
 const createT = tpath<Translations>()
@@ -158,7 +198,7 @@ const createT = tpath<Translations>()
     $locale: ({ ctx }) => ctx.locale,
     $debug: ({ ctx }) => ctx.debug,
   })
-  .resolve((keys, ctx) => {
+  .format(({ ctx, keys }) => {
     if (ctx.debug) return keys.join('.');
 
     return ctx.messages[keys.join('.')];
@@ -172,7 +212,7 @@ t.common.home.title.$locale(); // "en"
 ## Debug Pattern
 
 TPath does not have built-in debug behavior. If you want every call to return the joined key, make
-that part of your resolver policy:
+that part of your formatter policy:
 
 ```ts
 const createT = tpath<Translations>()
@@ -180,7 +220,7 @@ const createT = tpath<Translations>()
     readonly debug: boolean;
     readonly messages: Readonly<Record<string, string | undefined>>;
   }>()
-  .resolve((keys, ctx) => {
+  .format(({ ctx, keys }) => {
     if (ctx.debug) return keys.join('.');
 
     return ctx.messages[keys.join('.')];

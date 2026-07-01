@@ -27,15 +27,37 @@ function appendKey(keys: readonly string[], child: string | undefined): readonly
   return [...keys, child];
 }
 
-function resolveWithDebug(
+function formatWithDebug(
   keys: readonly string[],
-  ctx: { readonly debug: boolean; readonly messages: Readonly<Record<string, string | undefined>> },
-): string {
+  ctx: {
+    readonly debug: boolean;
+    readonly messages: Readonly<Record<string, string | undefined>>;
+  },
+): string | undefined {
   if (ctx.debug) {
     return keys.join('.');
   }
 
-  return ctx.messages[keys.join('.')] ?? 'Home';
+  return ctx.messages[keys.join('.')];
+}
+
+function lookupAndFormat(
+  keys: readonly string[],
+  ctx: {
+    readonly formatter: {
+      readonly format: (message: string, interpolation?: object) => string;
+    };
+    readonly messages: Readonly<Record<string, string | undefined>>;
+  },
+  interpolation: object | undefined,
+): string | undefined {
+  const message = ctx.messages[keys.join('.')];
+
+  if (message === undefined) {
+    return undefined;
+  }
+
+  return ctx.formatter.format(message, interpolation);
 }
 
 describe('tpath', () => {
@@ -43,7 +65,7 @@ describe('tpath', () => {
     vi.restoreAllMocks();
   });
 
-  test('passes collected keys to the caller-owned resolver', () => {
+  test('passes collected keys to the caller-owned formatter', () => {
     const requestedKeys: string[][] = [];
     const messages = {
       'common.home.title': 'Home',
@@ -51,7 +73,7 @@ describe('tpath', () => {
 
     const createT = tpath<Translations>()
       .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
-      .resolve((keys, ctx) => {
+      .format(({ ctx, keys }) => {
         requestedKeys.push([...keys]);
 
         return ctx.messages[keys.join('.')];
@@ -65,7 +87,7 @@ describe('tpath', () => {
   test('binds translation context when creating a proxy', () => {
     const createT = tpath<Translations>()
       .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
-      .resolve((keys, ctx) => ctx.messages[keys.join('.')]);
+      .format(({ ctx, keys }) => ctx.messages[keys.join('.')]);
 
     const en = createT({ messages: { 'common.home.title': 'Home' } });
     const alternate = createT({ messages: { 'common.home.title': 'Start' } });
@@ -74,39 +96,70 @@ describe('tpath', () => {
     expect(alternate.common.home.title()).toBe('Start');
   });
 
-  test('formats ICU interpolation values', () => {
-    const translations = {
+  test('formats interpolation with a caller-owned formatter from context', () => {
+    const messages = {
       'common.home.greeting': 'Hello, {name}!',
       'common.home.score': '{name} has {score, number} points',
       'admin.users.count': '{count, plural, one {# user} other {# users}}',
     };
+    const formatMessages: Readonly<Record<string, (interpolation?: object) => string>> = {
+      'Hello, {name}!'(interpolation) {
+        return `Hello, ${(interpolation as { readonly name: string }).name}!`;
+      },
+      '{count, plural, one {# user} other {# users}}'(interpolation) {
+        const count = (interpolation as { readonly count: number }).count;
+
+        return `${count} users`;
+      },
+      '{name} has {score, number} points'(interpolation) {
+        const values = interpolation as { readonly name: string; readonly score: number };
+
+        return `${values.name} has ${values.score} points`;
+      },
+    };
+    const formatter = {
+      format(message: string, interpolation?: object) {
+        return formatMessages[message as keyof typeof formatMessages](interpolation);
+      },
+    };
     const t = tpath<Translations>()
-      .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
-      .resolve((keys, ctx) => ctx.messages[keys.join('.')])({ messages: translations });
+      .ctx<{
+        readonly formatter: typeof formatter;
+        readonly messages: Readonly<Record<string, string | undefined>>;
+      }>()
+      .format(({ ctx, interpolation, keys }) => lookupAndFormat(keys, ctx, interpolation))({
+      formatter,
+      messages,
+    });
 
     expect(t.common.home.greeting({ name: 'Ada' })).toBe('Hello, Ada!');
     expect(t.common.home.score({ name: 'Ada', score: 7 })).toBe('Ada has 7 points');
     expect(t.admin.users.count({ count: 2 })).toBe('2 users');
   });
 
-  test('lets extensions call translate with caller-owned keys', () => {
-    const translations = {
+  test('lets extensions call format with caller-owned keys', () => {
+    const messages = {
       'common.home.greeting': 'Hello, {name}!',
     };
     const t = tpath<Translations>()
       .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
       .extend({
-        $({ keys, translate }, child: string, interpolation?: object) {
-          return translate([...keys, child], interpolation);
+        $({ format, keys }, child: string, interpolation?: object) {
+          return format([...keys, child], interpolation);
         },
       })
-      .resolve((keys, ctx) => ctx.messages[keys.join('.')])({ messages: translations });
+      .format(({ ctx, interpolation, keys }) => {
+        const message = ctx.messages[keys.join('.')];
+        const values = interpolation as { readonly name: string };
+
+        return message?.replace('{name}', values.name);
+      })({ messages });
 
     expect(t.common.$('home.greeting', { name: 'Ada' })).toBe('Hello, Ada!');
   });
 
-  test('lets extensions inspect current keys and resolve caller-owned keys', () => {
-    const translations = {
+  test('lets extensions inspect current keys and caller-owned context', () => {
+    const messages = {
       'common.home.empty': '',
       'common.home.title': 'Home',
     };
@@ -117,16 +170,16 @@ describe('tpath', () => {
         readonly messages: Readonly<Record<string, string | undefined>>;
       }>()
       .extend({
-        $exists({ keys, resolve }, child?: string) {
-          return resolve(appendKey(keys, child)) !== undefined;
+        $exists({ ctx, keys }, child?: string) {
+          return ctx.messages[appendKey(keys, child).join('.')] !== undefined;
         },
         $loading({ ctx, keys }, child?: string) {
           return ctx.loadingKeys.has(appendKey(keys, child).join('.'));
         },
       })
-      .resolve((keys, ctx) => ctx.messages[keys.join('.')])({
+      .format(({ ctx, keys }) => ctx.messages[keys.join('.')])({
       loadingKeys,
-      messages: translations,
+      messages,
     });
 
     expect(t.common.home.empty.$exists()).toBe(true);
@@ -149,7 +202,7 @@ describe('tpath', () => {
           return ctx.debug;
         },
       })
-      .resolve(() => 'Home')({
+      .format(() => 'Home')({
       debug: true,
       locale: 'en',
     });
@@ -158,43 +211,45 @@ describe('tpath', () => {
     expect(t.common.home.title.$debug()).toBe(true);
   });
 
-  test('falls back to the joined key when a translation is missing', () => {
-    const t = tpath<Translations>().resolve(() => undefined)();
+  test('falls back to the joined key when formatting returns no translation', () => {
+    const t = tpath<Translations>().format(() => undefined)();
 
     expect(t.common.home.title()).toBe('common.home.title');
   });
 
-  test('lets the resolver implement debug mode from context', () => {
-    const resolver = vi.fn<
-      (
-        keys: readonly string[],
-        ctx: {
+  test('lets the formatter implement debug mode from context', () => {
+    const formatter = vi.fn<
+      (context: {
+        readonly ctx: {
           readonly debug: boolean;
           readonly messages: Readonly<Record<string, string | undefined>>;
-        },
-      ) => string
-    >(resolveWithDebug);
+        };
+        readonly keys: readonly string[];
+      }) => string | undefined
+    >(({ ctx, keys }) => formatWithDebug(keys, ctx));
     const t = tpath<Translations>()
       .ctx<{
         readonly debug: boolean;
         readonly messages: Readonly<Record<string, string | undefined>>;
       }>()
-      .resolve(resolver)({ debug: true, messages: {} });
+      .format(formatter)({ debug: true, messages: {} });
 
     expect(t.common.home.title()).toBe('common.home.title');
-    expect(resolver).toHaveBeenCalledTimes(1);
+    expect(formatter).toHaveBeenCalledTimes(1);
   });
 
-  test('reports ICU format errors and falls back to the joined key', () => {
+  test('reports formatter errors and falls back to the joined key', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const t = tpath<Translations>().resolve(() => 'Hello, {name')();
+    const t = tpath<Translations>().format(() => {
+      throw new Error('formatter failed');
+    })();
 
     expect(t.common.home.greeting({ name: 'Ada' })).toBe('common.home.greeting');
-    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('ICU formatting error:'));
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('Message formatting error:'));
   });
 
   test('rejects symbol path keys', () => {
-    const t = tpath<Translations>().resolve(() => undefined)();
+    const t = tpath<Translations>().format(() => undefined)();
 
     expect(() => {
       Reflect.get(t, Symbol('bad'));

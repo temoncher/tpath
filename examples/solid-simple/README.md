@@ -13,7 +13,7 @@ interpolation, debug-key rendering, and one small `$exists` extension.
 - The language selector swaps the nested dictionary passed into `createT`.
 - `ctx.messages` owns nested lookup data instead of a closure around a module variable.
 - `ctx.debug()` makes the same factory render joined keys.
-- The `$exists` extension is opt-in and receives the same bound context helpers as the resolver.
+- The `$exists` extension is opt-in and receives the same bound context as the formatter.
 - Solid owns form state; TPath owns path collection and formatting.
 
 ## Run It
@@ -27,7 +27,7 @@ pnpm build
 
 ## Files To Read
 
-- `src/App.tsx` contains the translator factory, nested resolver, and notes UI.
+- `src/App.tsx` contains the translator factory, nested lookup, and notes UI.
 - `src/translations/` contains the nested dictionaries.
 - `src/main.tsx` binds the browser messages.
 - `src/App.test.tsx` verifies translation, interpolation, and debug behavior.

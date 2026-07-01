@@ -30,6 +30,7 @@ describe("translation service", () => {
   test("supports id-based translations from server-owned ids", () => {
     const t = createT({
       errorNamespaces: new Map(),
+      locale: "en",
       loadingNamespaces: new Set(),
       messages: { ...flattenMessages(issuesEn) },
     });
@@ -41,6 +42,7 @@ describe("translation service", () => {
   test("marks translation namespaces as loading for shimmer placeholders", () => {
     const t = createT({
       errorNamespaces: new Map(),
+      locale: "en",
       loadingNamespaces: new Set(["app"]),
       messages: { ...flattenMessages(appEn), ...flattenMessages(dashboardEn) },
     });
@@ -53,6 +55,7 @@ describe("translation service", () => {
   test("returns extension-owned keys for test ids", () => {
     const t = createT({
       errorNamespaces: new Map(),
+      locale: "en",
       loadingNamespaces: new Set(),
       messages: { ...flattenMessages(appEn) },
     });
@@ -67,6 +70,7 @@ describe("translation service", () => {
         ["demo", "Translation request failed: 500"],
         ["issues", "Translation request failed: 404"],
       ]),
+      locale: "en",
       loadingNamespaces: new Set(),
       messages: { ...flattenMessages(appEn) },
     });

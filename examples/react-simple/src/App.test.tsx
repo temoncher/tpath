@@ -69,20 +69,17 @@ describe("react-simple example", () => {
   });
 
   test("can render keys from the same translator factory in debug mode", () => {
-    const t = createT({ debug: () => true, messages: () => en });
+    const t = createT({ debug: true, locale: "en", messages: en });
 
     expect(t.app.title()).toBe("app.title");
     expect(t.app.notes.empty()).toBe("app.notes.empty");
   });
 
-  test("resolves accessor state through the same translator proxy", () => {
-    let debug = false;
-    const t = createT({ debug: () => debug, messages: () => en });
+  test("uses plain React context values from each render", () => {
+    const regular = createT({ debug: false, locale: "en", messages: en });
+    const debug = createT({ debug: true, locale: "en", messages: en });
 
-    expect(t.app.title()).toBe("TPath Notes");
-
-    debug = true;
-
-    expect(t.app.title()).toBe("app.title");
+    expect(regular.app.title()).toBe("TPath Notes");
+    expect(debug.app.title()).toBe("app.title");
   });
 });

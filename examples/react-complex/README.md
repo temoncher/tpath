@@ -69,7 +69,7 @@ pnpm build
 ## Files To Read
 
 - `tools/generate-translations.ts` contains the flat-JSON to nested-TS generator.
-- `src/shared/translationService.ts` contains the TPath factory, resolver, `$`, `$key`,
+- `src/shared/createT.ts` contains the TPath factory, formatter, `$`, `$key`,
   `$error`, and `$loading`.
 - `src/shared/useT.ts` contains async locale query composition.
 - `src/app/shellDeps.ts` contains static translation JSON loading for the app shell.

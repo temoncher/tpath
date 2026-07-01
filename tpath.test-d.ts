@@ -25,13 +25,13 @@ function appendKey(keys: readonly string[], child: string | undefined): readonly
   return [...keys, child];
 }
 
-function resolveWithDebug(
+function formatWithDebug(
   keys: readonly string[],
   ctx: {
     readonly debug: boolean;
     readonly messages: Readonly<Record<string, string | undefined>>;
   },
-): string {
+): string | undefined {
   if (ctx.debug) {
     return keys.join('.');
   }
@@ -40,7 +40,7 @@ function resolveWithDebug(
 }
 
 test('types nested translation paths', () => {
-  const t = tpath<Translations>().resolve(() => 'value')();
+  const t = tpath<Translations>().format(() => 'value')();
 
   assertType<string>(t.common.home.title());
   assertType<string>(t.common.home.greeting({ name: 'Ada' }));
@@ -55,7 +55,7 @@ test('types nested translation paths', () => {
 });
 
 test('requires interpolation only for messages that declare it', () => {
-  const t = tpath<Translations>().resolve(() => 'value')();
+  const t = tpath<Translations>().format(() => 'value')();
 
   t.common.home.title();
 
@@ -73,7 +73,7 @@ test('requires interpolation only for messages that declare it', () => {
 });
 
 test('does not accept context when no context type is declared', () => {
-  const createT = tpath<Translations>().resolve(() => 'value');
+  const createT = tpath<Translations>().format(() => 'value');
   const t = createT();
 
   assertType<string>(t.common.home.title());
@@ -89,22 +89,21 @@ test('treats an empty factory context as no context argument', () => {
   expectTypeOf<Factory>().toEqualTypeOf<(ctx?: never) => T>();
 });
 
-test('types resolver context and factory argument', () => {
+test('formats values through a required formatter instead of resolve', () => {
   const createT = tpath<Translations>()
     .ctx<{
-      readonly debug: boolean;
       readonly messages: Readonly<Record<string, string | undefined>>;
     }>()
-    .resolve((keys, ctx) => {
+    .format(({ ctx, interpolation, key, keys }) => {
       expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
-      assertType<boolean>(ctx.debug);
+      assertType<string>(key);
+      expectTypeOf(interpolation).toEqualTypeOf<object | undefined>();
       expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
 
       return ctx.messages[keys.join('.')];
     });
 
   const t = createT({
-    debug: false,
     messages: {
       'common.home.title': 'Home',
     },
@@ -116,7 +115,10 @@ test('types resolver context and factory argument', () => {
   createT();
 
   // @ts-expect-error missing context property
-  createT({ debug: false });
+  createT({});
+
+  // @ts-expect-error resolve is not part of the builder API
+  tpath<Translations>().resolve(() => 'value');
 });
 
 test('types extension context and public extension arguments', () => {
@@ -126,11 +128,16 @@ test('types extension context and public extension arguments', () => {
       readonly messages: Readonly<Record<string, string | undefined>>;
     }>()
     .extend({
-      $exists({ keys, resolve }, child?: string) {
+      $({ format, keys }, child: string, interpolation?: object) {
         expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
-        expectTypeOf(resolve).toEqualTypeOf<(keys: readonly string[]) => string | undefined>();
+        expectTypeOf(format).toEqualTypeOf<
+          (keys: readonly string[], interpolation?: object) => string
+        >();
 
-        return resolve(appendKey(keys, child)) !== undefined;
+        return format(appendKey(keys, child), interpolation);
+      },
+      $exists({ ctx, keys }, child?: string) {
+        return ctx.messages[appendKey(keys, child).join('.')] !== undefined;
       },
       $loading({ ctx, keys }, child: string, priority?: number) {
         assertType<readonly string[]>(keys);
@@ -141,11 +148,12 @@ test('types extension context and public extension arguments', () => {
         return true;
       },
     })
-    .resolve((keys, ctx) => ctx.messages[keys.join('.')])({
+    .format(({ ctx, keys }) => ctx.messages[keys.join('.')])({
     loadingKeys: new Set(),
     messages: {},
   });
 
+  assertType<string>(t.common.$('home.title'));
   assertType<boolean>(t.common.home.title.$exists());
   assertType<boolean>(t.common.home.$exists('title'));
   assertType<boolean>(t.common.home.$loading('title'));
@@ -161,7 +169,7 @@ test('types extension context and public extension arguments', () => {
   t.common.home.$loading('title', 'high');
 });
 
-test('types shared context in resolver and extension context', () => {
+test('types shared context in formatter and extension context', () => {
   const t = tpath<Translations>()
     .ctx<{
       readonly debug: boolean;
@@ -184,12 +192,12 @@ test('types shared context in resolver and extension context', () => {
         return ctx.strict === expected;
       },
     })
-    .resolve((keys, ctx) => {
+    .format(({ ctx, keys }) => {
       assertType<boolean>(ctx.debug);
       assertType<string>(ctx.locale);
       assertType<boolean>(ctx.strict);
 
-      return resolveWithDebug(keys, ctx);
+      return formatWithDebug(keys, ctx);
     })({
     debug: true,
     locale: 'en',
@@ -219,7 +227,7 @@ test('preserves context declared before later context declarations', () => {
     .ctx<{
       readonly messages: Readonly<Record<string, string | undefined>>;
     }>()
-    .resolve((keys, ctx) => {
+    .format(({ ctx, keys }) => {
       assertType<string>(ctx.locale);
       expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
 
@@ -238,7 +246,7 @@ test('preserves context declared before later context declarations', () => {
 });
 
 test('does not expose extensions that were not provided', () => {
-  const t = tpath<Translations>().resolve(() => 'value')();
+  const t = tpath<Translations>().format(() => 'value')();
 
   // @ts-expect-error $exists is not built in
   t.common.home.title.$exists();

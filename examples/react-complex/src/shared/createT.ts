@@ -1,3 +1,5 @@
+import { IntlMessageFormat } from "intl-messageformat";
+
 import { tpath } from "../../../../tpath.ts";
 import type appEn from "../__translationMocks__/app.gen.ts";
 import type commitsEn from "../__translationMocks__/commits.gen.ts";
@@ -21,6 +23,7 @@ export type TranslationMessages = FlatMessages;
 
 interface TranslationContext {
   readonly errorNamespaces: ReadonlyMap<TranslationNamespace, string>;
+  readonly locale: Locale;
   readonly loadingNamespaces: ReadonlySet<TranslationNamespace>;
   readonly messages: TranslationMessages;
 }
@@ -32,8 +35,8 @@ export const createT = tpath<Translations>()
      * Resolves a runtime-provided child id under the current translation path.
      * Use it when the final key segment comes from fetched data instead of static code.
      */
-    $({ keys, translate }, id: string, interpolation?: object) {
-      return translate([...keys, id], interpolation);
+    $({ format, keys }, id: string, interpolation?: object) {
+      return format([...keys, id], interpolation);
     },
     /**
      * Returns this translation path as a stable key for test ids and other metadata.
@@ -59,7 +62,17 @@ export const createT = tpath<Translations>()
       );
     },
   })
-  .resolve((keys, ctx) => ctx.messages[joinKeys(keys)]);
+  .format(({ ctx, interpolation, keys }) => {
+    const message = ctx.messages[joinKeys(keys)];
+
+    if (message === undefined) {
+      return undefined;
+    }
+
+    return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
+      interpolation as any,
+    ) as string;
+  });
 
 function joinKeys(keys: readonly string[]) {
   return keys.join(".");

@@ -1,3 +1,4 @@
+import { IntlMessageFormat } from "intl-messageformat";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
@@ -10,24 +11,33 @@ type Translations = typeof en;
 
 interface TranslationContext {
   readonly debug: boolean;
+  readonly locale: string;
   readonly messages: Messages<Translations>;
 }
 
 export const createT = tpath<Translations>()
   .ctx<TranslationContext>()
   .extend({
-    $exists({ keys, resolve }, child?: string) {
+    $exists({ ctx, keys }, child?: string) {
       const nextKeys = child === undefined ? keys : [...keys, child];
 
-      return resolve(nextKeys) !== undefined;
+      return resolveNested(ctx.messages, nextKeys) !== undefined;
     },
   })
-  .resolve((keys, ctx) => {
+  .format(({ ctx, interpolation, keys }) => {
     if (ctx.debug) {
       return keys.join(".");
     }
 
-    return resolveNested(ctx.messages, keys);
+    const message = resolveNested(ctx.messages, keys);
+
+    if (message === undefined) {
+      return undefined;
+    }
+
+    return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
+      interpolation as any,
+    ) as string;
   });
 
 const translations = {
@@ -47,7 +57,8 @@ export function App({ initialLocale = "en" }: AppProps = {}) {
   const [notes, setNotes] = useState<readonly string[]>([]);
   const [text, setText] = useState("");
   const t = createT({
-    debug: false,
+    debug,
+    locale,
     messages: translations[locale],
   });
 
