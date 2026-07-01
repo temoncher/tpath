@@ -204,6 +204,39 @@ test('types shared context in resolver and extension context', () => {
   t.common.home.title.$strict('yes');
 });
 
+test('preserves context declared before later context declarations', () => {
+  const createT = tpath<Translations>()
+    .ctx<{
+      readonly locale: string;
+    }>()
+    .extend({
+      $locale({ ctx }) {
+        assertType<string>(ctx.locale);
+
+        return ctx.locale;
+      },
+    })
+    .ctx<{
+      readonly messages: Readonly<Record<string, string | undefined>>;
+    }>()
+    .resolve((keys, ctx) => {
+      assertType<string>(ctx.locale);
+      expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
+
+      return ctx.messages[keys.join('.')];
+    });
+
+  const t = createT({
+    locale: 'en',
+    messages: {},
+  });
+
+  assertType<string>(t.common.home.title.$locale());
+
+  // @ts-expect-error factory still requires context declared before extensions
+  createT({ messages: {} });
+});
+
 test('does not expose extensions that were not provided', () => {
   const t = tpath<Translations>().resolve(() => 'value')();
 

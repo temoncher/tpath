@@ -44,7 +44,7 @@ export namespace tpath {
     TContext extends object = {},
     TExtensions extends ExtensionMap<any> = {},
   > {
-    ctx<TNextContext extends object>(): Builder<TNamespace, TNextContext, TExtensions>;
+    ctx<TNextContext extends object>(): Builder<TNamespace, TContext & TNextContext, TExtensions>;
     extend<TNextExtensions extends ExtensionMap<TContext>>(
       extensions: TNextExtensions,
     ): Builder<TNamespace, TContext, TExtensions & TNextExtensions>;
@@ -166,7 +166,7 @@ function createTPathBuilder<
 >(extensions: TExtensions): tpath.Builder<TNamespace, TContext, TExtensions> {
   return {
     ctx<TNextContext extends object>() {
-      return createTPathBuilder<TNamespace, TNextContext, TExtensions>(extensions);
+      return createTPathBuilder<TNamespace, TContext & TNextContext, TExtensions>(extensions);
     },
     extend<TNextExtensions extends tpath.ExtensionMap<TContext>>(nextExtensions: TNextExtensions) {
       return createTPathBuilder<TNamespace, TContext, TExtensions & TNextExtensions>({
