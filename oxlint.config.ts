@@ -88,6 +88,7 @@ export default defineConfig({
     'vitest/expect-expect': 'off',
     'vitest/no-hooks': 'off',
     'vitest/no-importing-vitest-globals': 'off',
+    'vitest/prefer-called-once': 'off',
     'vitest/prefer-describe-function-title': 'off',
     'vitest/prefer-expect-assertions': 'off',
     'vitest/prefer-expect-type-of': 'off',

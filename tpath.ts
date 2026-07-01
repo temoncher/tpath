@@ -5,29 +5,68 @@ import { IntlMessageFormat } from 'intl-messageformat';
  *
  * ```ts
  * const messages = { 'common.home.title': 'Home' };
- * const t = tpath<{ common: { home: { title: 'Home' } } }>((keys) => messages[keys.join('.')]);
+ * const t = tpath((keys: tpath.Keys<{ common: { home: { title: 'Home' } } }>) => {
+ *     return messages[keys.join('.')];
+ * });
  *
  * t.common.home.title(); // "Home"
  * ```
  */
 export function tpath<TNamespace>(
-  lookup: tpath.Lookup,
-  options: tpath.Options = {},
-): tpath.Proxy<TNamespace> {
-  return createTPathProxy<TNamespace>(lookup, [], options);
+  resolveValue: (keys: tpath.Keys<TNamespace>, options: tpath.Options) => string | undefined,
+): tpath.Proxy<TNamespace, {}>;
+export function tpath<
+  TNamespace,
+  TOptions extends object,
+  TExtensions extends tpath.ExtensionMap<TOptions>,
+>(
+  resolveValue: (
+    keys: tpath.Keys<TNamespace>,
+    options: tpath.Options<TOptions>,
+  ) => string | undefined,
+  extensions: TExtensions,
+  options?: tpath.Options<TOptions>,
+): tpath.Proxy<TNamespace, TExtensions>;
+export function tpath<
+  TNamespace,
+  TOptions extends object,
+  TExtensions extends tpath.ExtensionMap<TOptions>,
+>(
+  resolveValue: (
+    keys: tpath.Keys<TNamespace>,
+    options: tpath.Options<TOptions>,
+  ) => string | undefined,
+  extensions = {} as TExtensions,
+  options = {} as tpath.Options<TOptions>,
+): tpath.Proxy<TNamespace, TExtensions> {
+  return createTPathProxy<TNamespace, TOptions, TExtensions>(resolveValue, extensions, [], options);
 }
 
 /**
  * The single runtime export for TPath.
  */
 export namespace tpath {
-  export type Lookup = (keys: readonly string[]) => string | undefined;
+  export type Keys<TNamespace> = readonly string[] & {
+    readonly [__tpathKeysTypes]: TNamespace;
+  };
 
-  export interface Options {
-    readonly debug?: () => boolean;
+  export type Options<TUserOptions extends object = {}> = Readonly<TUserOptions>;
+
+  export interface ExtensionContext<TOptions extends object = {}> {
+    readonly keys: readonly string[];
+    readonly options: Options<TOptions>;
+    readonly resolve: (keys: readonly string[]) => string | undefined;
+    readonly translate: (keys: readonly string[], interpolation?: object) => string;
   }
 
-  export type Proxy<TNamespace> = TProxy<TNamespace>;
+  export type ExtensionMap<TOptions extends object = {}> = Readonly<
+    Record<`$${string}`, (context: ExtensionContext<TOptions>, ...args: any[]) => unknown>
+  >;
+
+  export type Proxy<TNamespace, TExtensions extends ExtensionMap<any>> = TProxy<
+    TNamespace,
+    TExtensions
+  >;
 
   export type PickNs<TNamespaces, Ns> = Ns extends
     | [infer F extends keyof TNamespaces, ...infer R]
@@ -101,54 +140,56 @@ type TFunctionParams<TNamespace, TKey extends keyof TNamespace> = TNamespace[TKe
     : []
   : never;
 
-interface UnsafeTFunction {
-  /**
-   * Dynamic translation lookup for keys that are not known at compile time.
-   */
-  $: (key: string | number, interpolation?: object) => string;
-  /**
-   * Checks if a dynamic translation exists.
-   */
-  $exists: (key?: string | number) => boolean;
-}
+type StripContext<T> = T extends (
+  context: tpath.ExtensionContext<any>,
+  ...args: infer TArgs
+) => infer R
+  ? (...args: TArgs) => R
+  : never;
 
-interface TLeafUnsafeFunction {
-  /**
-   * Checks if this translation exists.
-   */
-  $exists: () => boolean;
-}
-
-type TLeafFunction<TNamespace, K extends keyof TNamespace> = TLeafUnsafeFunction &
-  ((...params: TFunctionParams<TNamespace, K>) => string);
-
-type TProxy<TNamespace> = UnsafeTFunction & {
-  readonly [K in keyof TNamespace]: TNamespace[K] extends string
-    ? TLeafFunction<TNamespace, K>
-    : TProxy<TNamespace[K]>;
+type ExtensionMethods<TExtensions extends tpath.ExtensionMap<any>> = {
+  readonly [K in keyof TExtensions]: StripContext<TExtensions[K]>;
 };
 
-function createTPathProxy<TNamespace>(
-  lookup: tpath.Lookup,
-  previousPath: readonly string[],
-  options: tpath.Options,
-): tpath.Proxy<TNamespace> {
-  function translationExists(...argArray: unknown[]) {
-    const keys = collectKeys(previousPath, parseArgs(argArray).argsKey);
+type TLeafFunction<
+  TNamespace,
+  K extends keyof TNamespace,
+  TExtensions extends tpath.ExtensionMap<any>,
+> = ExtensionMethods<TExtensions> & ((...params: TFunctionParams<TNamespace, K>) => string);
 
-    return lookup(keys) !== undefined;
+type TProxy<
+  TNamespace,
+  TExtensions extends tpath.ExtensionMap<any>,
+> = ExtensionMethods<TExtensions> & {
+  readonly [K in keyof TNamespace]: TNamespace[K] extends string
+    ? TLeafFunction<TNamespace, K, TExtensions>
+    : TProxy<TNamespace[K], TExtensions>;
+};
+
+// Phantom type channel used by `tpath.Keys`. No runtime property with this
+// key is ever written to key arrays.
+declare const __tpathKeysTypes: unique symbol;
+
+function createTPathProxy<
+  TNamespace,
+  TOptions extends object,
+  TExtensions extends tpath.ExtensionMap<TOptions>,
+>(
+  resolveValue: (
+    keys: tpath.Keys<TNamespace>,
+    options: tpath.Options<TOptions>,
+  ) => string | undefined,
+  extensions: TExtensions,
+  previousPath: readonly string[],
+  options: tpath.Options<TOptions>,
+): tpath.Proxy<TNamespace, TExtensions> {
+  function resolve(keys: readonly string[]) {
+    return resolveValue(keys as tpath.Keys<TNamespace>, options);
   }
 
-  function processTranslation(...argArray: unknown[]) {
-    const { argsKey, interpolation } = parseArgs(argArray);
-    const keys = collectKeys(previousPath, argsKey);
+  function translate(keys: readonly string[], interpolation?: object) {
     const key = keys.join('.');
-
-    if (options.debug?.()) {
-      return key;
-    }
-
-    const translation = lookup(keys);
+    const translation = resolve(keys);
 
     if (translation === undefined) {
       return key;
@@ -173,37 +214,32 @@ function createTPathProxy<TNamespace>(
         );
       }
 
-      if (key === '$') {
-        return processTranslation;
+      const extension = (
+        extensions as Readonly<
+          Record<
+            string,
+            ((context: tpath.ExtensionContext<TOptions>, ...args: unknown[]) => unknown) | undefined
+          >
+        >
+      )[key];
+
+      if (extension !== undefined) {
+        return (...args: unknown[]) =>
+          extension(
+            {
+              keys: previousPath,
+              options,
+              resolve,
+              translate,
+            },
+            ...args,
+          );
       }
 
-      if (key === '$exists') {
-        return translationExists;
-      }
-
-      return createTPathProxy(lookup, [...previousPath, key], options);
+      return createTPathProxy(resolveValue, extensions, [...previousPath, key], options);
     },
     apply(_target, _thisArg, argArray: unknown[]) {
-      return processTranslation(...argArray);
+      return translate(previousPath, argArray[0] as object | undefined);
     },
-  }) as unknown as tpath.Proxy<TNamespace>;
-}
-
-function parseArgs([firstArg, secondArg]: readonly unknown[]) {
-  if (typeof firstArg === 'string' || typeof firstArg === 'number') {
-    return { argsKey: firstArg.toString(), interpolation: secondArg };
-  }
-
-  return { interpolation: firstArg };
-}
-
-function collectKeys(
-  previousPath: readonly string[],
-  argsKey: string | undefined,
-): readonly string[] {
-  if (argsKey === undefined) {
-    return previousPath;
-  }
-
-  return [...previousPath, argsKey];
+  }) as unknown as tpath.Proxy<TNamespace, TExtensions>;
 }

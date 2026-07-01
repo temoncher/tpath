@@ -17,8 +17,31 @@ interface Translations {
   };
 }
 
+function appendKey(keys: readonly string[], child: string | undefined): readonly string[] {
+  if (child === undefined) {
+    return keys;
+  }
+
+  return [...keys, child];
+}
+
+function resolveWithDebug(
+  keys: tpath.Keys<Translations>,
+  options: {
+    readonly debug: () => boolean;
+    readonly locale: string;
+    readonly strict: boolean;
+  },
+): string {
+  if (options.debug()) {
+    return keys.join('.');
+  }
+
+  return 'value';
+}
+
 test('types nested translation paths', () => {
-  const t = tpath<Translations>(() => 'value');
+  const t = tpath((_keys: tpath.Keys<Translations>) => 'value');
 
   assertType<string>(t.common.home.title());
   assertType<string>(t.common.home.greeting({ name: 'Ada' }));
@@ -33,7 +56,7 @@ test('types nested translation paths', () => {
 });
 
 test('requires interpolation only for messages that declare it', () => {
-  const t = tpath<Translations>(() => 'value');
+  const t = tpath((_keys: tpath.Keys<Translations>) => 'value');
 
   t.common.home.title();
 
@@ -50,16 +73,91 @@ test('requires interpolation only for messages that declare it', () => {
   t.common.home.greeting({ name: true });
 });
 
-test('types unsafe helpers and lookup keys', () => {
-  const t = tpath<Translations>((keys) => {
-    expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
+test('types extension context and public extension arguments', () => {
+  const t = tpath(
+    (keys: tpath.Keys<Translations>) => {
+      expectTypeOf(keys).toEqualTypeOf<tpath.Keys<Translations>>();
 
-    return keys.join('.');
-  });
+      return 'value';
+    },
+    {
+      $exists({ keys, resolve }, child?: string) {
+        expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
+        expectTypeOf(resolve).toEqualTypeOf<(keys: readonly string[]) => string | undefined>();
 
-  assertType<string>(t.$('anything.dynamic', { value: 1 }));
-  assertType<boolean>(t.$exists('anything.dynamic'));
+        return resolve(appendKey(keys, child)) !== undefined;
+      },
+      $loading({ keys }, child: string, priority?: number) {
+        assertType<readonly string[]>(keys);
+        assertType<string>(child);
+        assertType<number | undefined>(priority);
+
+        return true;
+      },
+    },
+  );
+
   assertType<boolean>(t.common.home.title.$exists());
+  assertType<boolean>(t.common.home.$exists('title'));
+  assertType<boolean>(t.common.home.$loading('title'));
+  assertType<boolean>(t.common.home.$loading('title', 1));
+
+  // @ts-expect-error extension argument must be a string
+  t.common.home.$exists(1);
+
+  // @ts-expect-error required extension argument is missing
+  t.common.home.$loading();
+
+  // @ts-expect-error extension argument must be a number
+  t.common.home.$loading('title', 'high');
+});
+
+test('types user options in extension context', () => {
+  const t = tpath(
+    (_keys: tpath.Keys<Translations>, options) => {
+      assertType<() => boolean>(options.debug);
+      assertType<string>(options.locale);
+      assertType<boolean>(options.strict);
+
+      return resolveWithDebug(_keys, options);
+    },
+    {
+      $locale({ options }) {
+        assertType<() => boolean>(options.debug);
+        assertType<string>(options.locale);
+        assertType<boolean>(options.strict);
+
+        return options.locale;
+      },
+      $strict({ options }, expected: boolean) {
+        assertType<boolean>(options.strict);
+        assertType<boolean>(expected);
+
+        return options.strict === expected;
+      },
+    },
+    {
+      debug: () => true,
+      locale: 'en',
+      strict: true,
+    },
+  );
+
+  assertType<string>(t.common.home.title.$locale());
+  assertType<boolean>(t.common.home.title.$strict(true));
+
+  // @ts-expect-error extension argument must be boolean
+  t.common.home.title.$strict('yes');
+});
+
+test('does not expose extensions that were not provided', () => {
+  const t = tpath((_keys: tpath.Keys<Translations>) => 'value');
+
+  // @ts-expect-error $exists is not built in
+  t.common.home.title.$exists();
+
+  // @ts-expect-error $ is not built in
+  t.$('common.home.title');
 });
 
 test('picks selected namespaces', () => {
