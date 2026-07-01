@@ -1,0 +1,31 @@
+{
+  "name": "tpath",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A tiny copy-file translation path helper for TypeScript.",
+  "license": "MIT",
+  "author": "Artem Baranov <temoncher@yandex.ru>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/temoncher/tpath.git"
+  },
+  "type": "module",
+  "scripts": {
+    "lint": "oxlint --disable-nested-config",
+    "lint:fix": "oxlint --disable-nested-config --fix",
+    "format": "oxfmt --write -c oxfmt.config.ts --disable-nested-config \"*.ts\"",
+    "fix": "pnpm format && oxlint --disable-nested-config --fix",
+    "test": "vitest run",
+    "test:types": "vitest run --typecheck",
+    "typecheck": "tsc --noEmit --project tsconfig.json"
+  },
+  "dependencies": {
+    "intl-messageformat": "^10.7.18"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.52.0",
+    "oxlint": "^1.67.0",
+    "typescript": "5.7.2",
+    "vitest": "^4.1.7"
+  }
+}
