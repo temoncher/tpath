@@ -1,0 +1,11 @@
+{
+  "issues.title": "Открытые задачи",
+  "issues.loading": "Загрузка задач...",
+  "issues.empty": "Для этого репозитория открытые задачи не вернулись.",
+  "issues.openedBy": "открыл {author}",
+  "issues.status.open": "Открыта",
+  "issues.status.needs-triage": "Нужен разбор",
+  "issues.status.blocked": "Заблокирована",
+  "issues.actions.dashboard": "Назад к обзору",
+  "issues.actions.commits": "Смотреть коммиты"
+}

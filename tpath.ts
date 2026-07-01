@@ -21,10 +21,6 @@ export function tpath<TNamespace>(): tpath.Builder<TNamespace> {
  * The single runtime export for TPath.
  */
 export namespace tpath {
-  export type Keys<TNamespace> = readonly string[] & {
-    readonly [__tpathKeysTypes]: TNamespace;
-  };
-
   export type Context<TUserContext extends object = {}> = Readonly<TUserContext>;
 
   export interface ExtensionContext<TContext extends object = {}> {
@@ -38,7 +34,7 @@ export namespace tpath {
     Record<`$${string}`, (context: ExtensionContext<TContext>, ...args: any[]) => unknown>
   >;
 
-  export type TPath<TNamespace, TExtensions extends ExtensionMap<any>> = TProxy<
+  export type TPath<TNamespace, TExtensions extends ExtensionMap<any>> = _TPath<
     TNamespace,
     TExtensions
   >;
@@ -53,7 +49,7 @@ export namespace tpath {
       extensions: TNextExtensions,
     ): Builder<TNamespace, TContext, TExtensions & TNextExtensions>;
     resolve(
-      resolveValue: (keys: Keys<TNamespace>, ctx: Context<TContext>) => string | undefined,
+      resolveValue: (keys: readonly string[], ctx: Context<TContext>) => string | undefined,
     ): Factory<TNamespace, TContext, TExtensions>;
   }
 
@@ -61,7 +57,7 @@ export namespace tpath {
     TNamespace,
     TContext extends object,
     TExtensions extends ExtensionMap<any>,
-  > = keyof TContext extends never
+  > = [keyof TContext] extends [never]
     ? (ctx?: never) => TPath<TNamespace, TExtensions>
     : (ctx: Context<TContext>) => TPath<TNamespace, TExtensions>;
 
@@ -154,18 +150,14 @@ type TLeafFunction<
   TExtensions extends tpath.ExtensionMap<any>,
 > = ExtensionMethods<TExtensions> & ((...params: TFunctionParams<TNamespace, K>) => string);
 
-type TProxy<
+type _TPath<
   TNamespace,
   TExtensions extends tpath.ExtensionMap<any>,
 > = ExtensionMethods<TExtensions> & {
   readonly [K in keyof TNamespace]: TNamespace[K] extends string
     ? TLeafFunction<TNamespace, K, TExtensions>
-    : TProxy<TNamespace[K], TExtensions>;
+    : _TPath<TNamespace[K], TExtensions>;
 };
-
-// Phantom type channel used by `tpath.Keys`. No runtime property with this
-// key is ever written to key arrays.
-declare const __tpathKeysTypes: unique symbol;
 
 function createTPathBuilder<
   TNamespace,
@@ -199,13 +191,13 @@ function createTPathProxy<
   TContext extends object,
   TExtensions extends tpath.ExtensionMap<any>,
 >(
-  resolveValue: (keys: tpath.Keys<TNamespace>, ctx: tpath.Context<TContext>) => string | undefined,
+  resolveValue: (keys: readonly string[], ctx: tpath.Context<TContext>) => string | undefined,
   extensions: TExtensions,
   previousPath: readonly string[],
   ctx: tpath.Context<TContext>,
 ): tpath.TPath<TNamespace, TExtensions> {
   function resolve(keys: readonly string[]) {
-    return resolveValue(keys as tpath.Keys<TNamespace>, ctx);
+    return resolveValue(keys, ctx);
   }
 
   function translate(keys: readonly string[], interpolation?: object) {

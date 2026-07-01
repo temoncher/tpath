@@ -1,0 +1,10 @@
+{
+  "dashboard.title": "Repository overview",
+  "dashboard.loading": "Loading repository...",
+  "dashboard.noDescription": "No description provided.",
+  "dashboard.stats.stars": "Stars",
+  "dashboard.stats.forks": "Forks",
+  "dashboard.stats.openIssues": "Open issues",
+  "dashboard.actions.commits": "View commits",
+  "dashboard.actions.issues": "View issues"
+}

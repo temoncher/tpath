@@ -26,7 +26,7 @@ function appendKey(keys: readonly string[], child: string | undefined): readonly
 }
 
 function resolveWithDebug(
-  keys: tpath.Keys<Translations>,
+  keys: readonly string[],
   ctx: {
     readonly debug: boolean;
     readonly messages: Readonly<Record<string, string | undefined>>;
@@ -82,6 +82,13 @@ test('does not accept context when no context type is declared', () => {
   createT({});
 });
 
+test('treats an empty factory context as no context argument', () => {
+  type Factory = tpath.Factory<Translations, {}, {}>;
+  type T = tpath.TPath<Translations, {}>;
+
+  expectTypeOf<Factory>().toEqualTypeOf<(ctx?: never) => T>();
+});
+
 test('types resolver context and factory argument', () => {
   const createT = tpath<Translations>()
     .ctx<{
@@ -89,7 +96,7 @@ test('types resolver context and factory argument', () => {
       readonly messages: Readonly<Record<string, string | undefined>>;
     }>()
     .resolve((keys, ctx) => {
-      expectTypeOf(keys).toEqualTypeOf<tpath.Keys<Translations>>();
+      expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
       assertType<boolean>(ctx.debug);
       expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
 

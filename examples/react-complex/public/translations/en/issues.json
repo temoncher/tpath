@@ -1,0 +1,11 @@
+{
+  "issues.title": "Open issues",
+  "issues.loading": "Loading issues...",
+  "issues.empty": "No open issues returned for this repository.",
+  "issues.openedBy": "opened by {author}",
+  "issues.status.open": "Open",
+  "issues.status.needs-triage": "Needs triage",
+  "issues.status.blocked": "Blocked",
+  "issues.actions.dashboard": "Back to overview",
+  "issues.actions.commits": "View commits"
+}

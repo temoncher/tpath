@@ -28,7 +28,7 @@ function appendKey(keys: readonly string[], child: string | undefined): readonly
 }
 
 function resolveWithDebug(
-  keys: tpath.Keys<Translations>,
+  keys: readonly string[],
   ctx: { readonly debug: boolean; readonly messages: Readonly<Record<string, string | undefined>> },
 ): string {
   if (ctx.debug) {
@@ -167,7 +167,7 @@ describe('tpath', () => {
   test('lets the resolver implement debug mode from context', () => {
     const resolver = vi.fn<
       (
-        keys: tpath.Keys<Translations>,
+        keys: readonly string[],
         ctx: {
           readonly debug: boolean;
           readonly messages: Readonly<Record<string, string | undefined>>;

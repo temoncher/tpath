@@ -1,0 +1,50 @@
+{
+  "name": "tpath-example-react-complex",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "pnpm generate:translations && oxfmt --check . && oxlint && tsc --noEmit --project tsconfig.json && knip",
+    "dev": "vite --host 127.0.0.1",
+    "build": "pnpm generate:translations && tsc --noEmit --project tsconfig.json && vite build",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt --write .",
+    "fix": "oxfmt --write . && oxlint --fix",
+    "generate:translations": "tsx tools/generate-translations.ts",
+    "knip": "pnpm generate:translations && knip",
+    "knip:exports": "pnpm generate:translations && knip --exports",
+    "test": "pnpm generate:translations && vitest run --config vitest.config.ts",
+    "test:component": "pnpm test",
+    "test:types": "pnpm generate:translations && vitest run --config vitest.config.ts --typecheck",
+    "storybook": "storybook dev -p 6006 --no-open",
+    "build-storybook": "storybook build"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.101.2",
+    "intl-messageformat": "^10.7.18",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "wouter": "3.0.0"
+  },
+  "devDependencies": {
+    "@storybook/react-vite": "^10.0.0",
+    "@testing-library/dom": "^10.0.0",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^27.0.0",
+    "knip": "^5.0.0",
+    "oxfmt": "0.52.0",
+    "oxlint": "^1.67.0",
+    "storybook": "^10.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "5.7.2",
+    "vite": "^7.0.0",
+    "vitest": "^4.0.0"
+  }
+}

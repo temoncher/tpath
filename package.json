@@ -15,7 +15,7 @@
     "lint:fix": "oxlint --disable-nested-config --fix",
     "format": "pnpm format:root && pnpm format:examples",
     "format:root": "oxfmt --write -c oxfmt.config.ts --disable-nested-config \"*.{json,ts,md}\" \"!examples/**\"",
-    "format:examples": "pnpm --dir examples/react-simple format",
+    "format:examples": "pnpm --dir examples/react-simple format && pnpm --dir examples/react-complex format",
     "fix": "pnpm format && oxlint --disable-nested-config --fix",
     "test": "vitest run",
     "test:types": "vitest run --typecheck",

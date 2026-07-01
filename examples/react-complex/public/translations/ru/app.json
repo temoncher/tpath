@@ -1,0 +1,12 @@
+{
+  "app.eyebrow": "Repo Lens",
+  "app.title": "Repo Lens",
+  "app.tagline": "Пример GitHub API с асинхронными переводами из статического JSON.",
+  "app.locale.label": "Язык",
+  "app.locale.en": "Английский",
+  "app.locale.ru": "Русский",
+  "app.nav.dashboard": "Обзор",
+  "app.nav.commits": "Коммиты",
+  "app.nav.issues": "Задачи",
+  "app.routeLoading": "Загрузка раздела..."
+}

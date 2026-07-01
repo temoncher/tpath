@@ -1,0 +1,8 @@
+{
+  "commits.title": "Последние коммиты",
+  "commits.loading": "Загрузка коммитов...",
+  "commits.empty": "Для этого репозитория коммиты не вернулись.",
+  "commits.byAuthor": "{sha}, автор {author}",
+  "commits.actions.dashboard": "Назад к обзору",
+  "commits.actions.issues": "Смотреть задачи"
+}

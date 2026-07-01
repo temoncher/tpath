@@ -1,0 +1,6 @@
+{
+  "demo.title": "Staggered translation loading",
+  "demo.fastValue": "Navigation text has loaded.",
+  "demo.slowValue": "This demo message was delayed on purpose.",
+  "demo.pendingValue": "Waiting for delayed namespace..."
+}

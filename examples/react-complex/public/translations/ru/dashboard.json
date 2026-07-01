@@ -1,0 +1,10 @@
+{
+  "dashboard.title": "Обзор репозитория",
+  "dashboard.loading": "Загрузка репозитория...",
+  "dashboard.noDescription": "Описание не указано.",
+  "dashboard.stats.stars": "Звезды",
+  "dashboard.stats.forks": "Форки",
+  "dashboard.stats.openIssues": "Открытые задачи",
+  "dashboard.actions.commits": "Смотреть коммиты",
+  "dashboard.actions.issues": "Смотреть задачи"
+}

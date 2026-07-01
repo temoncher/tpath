@@ -49,7 +49,6 @@ export function App({ initialLocale = "en" }: AppProps = {}) {
     debug: false,
     messages: translations[locale],
   });
-  const hasPlaceholder = t.app.form.placeholder.$exists();
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -85,7 +84,7 @@ export function App({ initialLocale = "en" }: AppProps = {}) {
         <label htmlFor="note">{t.app.form.label()}</label>
         <input
           id="note"
-          placeholder={hasPlaceholder ? t.app.form.placeholder() : undefined}
+          placeholder={t.app.form.placeholder.$exists() ? t.app.form.placeholder() : undefined}
           value={text}
           onChange={(event) => setText(event.currentTarget.value)}
         />

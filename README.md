@@ -216,4 +216,16 @@ pnpm --dir examples/react-simple test
 pnpm --dir examples/react-simple build
 ```
 
+The `examples/react-complex` app shows a heavier GitHub UI with async static JSON translations split
+by namespace, generated nested type fixtures, id-based status labels, `$loading` shimmer text, lazy
+feature routes, and stories.
+
+```sh
+pnpm --dir examples/react-complex install
+pnpm --dir examples/react-complex generate:translations
+pnpm --dir examples/react-complex dev
+pnpm --dir examples/react-complex test
+pnpm --dir examples/react-complex build
+```
+
 The package is marked `"private": true` because TPath is intended to be copied, not published.

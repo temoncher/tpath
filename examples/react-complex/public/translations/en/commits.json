@@ -1,0 +1,8 @@
+{
+  "commits.title": "Recent commits",
+  "commits.loading": "Loading commits...",
+  "commits.empty": "No commits returned for this repository.",
+  "commits.byAuthor": "{sha} by {author}",
+  "commits.actions.dashboard": "Back to overview",
+  "commits.actions.issues": "View issues"
+}
