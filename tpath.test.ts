@@ -211,10 +211,10 @@ describe('tpath', () => {
     expect(t.common.home.title.$debug()).toBe(true);
   });
 
-  test('falls back to the joined key when formatting returns no translation', () => {
+  test('returns undefined when the caller-owned formatter returns no translation', () => {
     const t = tpath<Translations>().format(() => undefined)();
 
-    expect(t.common.home.title()).toBe('common.home.title');
+    expect(t.common.home.title()).toBeUndefined();
   });
 
   test('lets the formatter implement debug mode from context', () => {
@@ -238,14 +238,12 @@ describe('tpath', () => {
     expect(formatter).toHaveBeenCalledTimes(1);
   });
 
-  test('reports formatter errors and falls back to the joined key', () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  test('lets formatter errors propagate to the caller', () => {
     const t = tpath<Translations>().format(() => {
       throw new Error('formatter failed');
     })();
 
-    expect(t.common.home.greeting({ name: 'Ada' })).toBe('common.home.greeting');
-    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('Message formatting error:'));
+    expect(() => t.common.home.greeting({ name: 'Ada' })).toThrow('formatter failed');
   });
 
   test('rejects symbol path keys', () => {

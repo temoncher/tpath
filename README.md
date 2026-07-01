@@ -56,6 +56,10 @@ parser is designed around the
 [ICU message format](https://unicode-org.github.io/icu/userguide/format_parse/messages/?utm_source=chatgpt.com),
 but runtime parsing is deliberately caller-owned.
 
+The formatter also owns missing-translation and error behavior. TPath returns the formatter result
+as-is: if the formatter returns `undefined`, the translated call returns `undefined`; if the
+formatter throws, the error propagates to the caller.
+
 If you want ICU formatting with `intl-messageformat`, call it inside `.format(...)`:
 
 ```sh
@@ -91,12 +95,14 @@ const t = createT({
 t.common.home.greeting({ name: 'Ada' }); // "Hello, Ada!"
 ```
 
-Missing translations fall back to the joined key:
+Missing translations are caller-owned:
 
 ```ts
 t.common.home.missing(); // TypeScript error
-t.common.home.title(); // "common.home.title" if format returns undefined
+t.common.home.title(); // undefined if format returns undefined
 ```
+
+If you want joined-key fallback or debug output, return `keys.join('.')` from your formatter.
 
 ## Caller-Owned Formatting
 
@@ -128,7 +134,8 @@ t.common.home.title(); // lookup receives ["common", "home", "title"]
 ```
 
 That keeps storage policy outside the helper. You can join with dots, split on the first namespace,
-load by locale, merge several dictionaries, or use a completely different key strategy.
+load by locale, merge several dictionaries, provide a fallback, throw on missing keys, or use a
+completely different key strategy.
 
 ## Extension Patterns
 

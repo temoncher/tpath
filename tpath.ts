@@ -1,5 +1,9 @@
 /**
- * Creates a typed translation path builder.
+ * Creates a typed translation path builder for a translation tree.
+ *
+ * The builder collects property names into a path and delegates every runtime
+ * lookup, fallback, interpolation, and error policy to the formatter passed to
+ * {@link tpath.Builder.format}.
  *
  * ```ts
  * const messages = { 'common.home.title': 'Home' };
@@ -16,49 +20,143 @@ export function tpath<TNamespace>(): tpath.Builder<TNamespace> {
 }
 
 /**
- * The single runtime export for TPath.
+ * Public types that describe TPath builders, factories, translators, and
+ * extension callbacks.
  */
 export namespace tpath {
+  /**
+   * Immutable user context bound when a translator factory is called.
+   *
+   * ```ts
+   * type TContext = tpath.Context<{ locale: string }>;
+   * ```
+   */
   export type Context<TUserContext extends object = {}> = Readonly<TUserContext>;
 
+  /**
+   * Data passed as the first argument to every extension method.
+   */
   export interface ExtensionContext<TContext extends object = {}> {
+    /**
+     * The context object passed to the translator factory.
+     */
     readonly ctx: Context<TContext>;
-    readonly format: (keys: readonly string[], interpolation?: object) => string;
+    /**
+     * Formats an explicit path from inside an extension.
+     *
+     * ```ts
+     * const extensions = {
+     *   $({ format, keys }: tpath.ExtensionContext, child: string) {
+     *     return format([...keys, child]);
+     *   },
+     * };
+     * ```
+     */
+    readonly format: (keys: readonly string[], interpolation?: object) => string | undefined;
+    /**
+     * The collected path at the extension call site.
+     */
     readonly keys: readonly string[];
   }
 
+  /**
+   * Data passed to the formatter when a translated leaf is invoked.
+   */
   export interface FormatContext<TContext extends object = {}> {
+    /**
+     * The context object passed to the translator factory.
+     */
     readonly ctx: Context<TContext>;
+    /**
+     * Interpolation values from the leaf call, or `undefined` when the message
+     * type does not require interpolation.
+     */
     readonly interpolation: object | undefined;
-    readonly key: string;
+    /**
+     * The collected translation path.
+     */
     readonly keys: readonly string[];
   }
 
+  /**
+   * Formatter callback used by {@link Builder.format}.
+   *
+   * Return the translated string, or `undefined` when your lookup policy has no
+   * value for the path. Thrown errors are left for the caller to handle.
+   *
+   * ```ts
+   * const format: tpath.FormatMessage<{ messages: Record<string, string> }> = ({ ctx, keys }) =>
+   *   ctx.messages[keys.join('.')];
+   * ```
+   */
   export type FormatMessage<TContext extends object = {}> = (
     context: FormatContext<TContext>,
   ) => string | undefined;
 
+  /**
+   * Map of opt-in extension methods exposed on every path node.
+   *
+   * Extension names must start with `$` so they do not collide with ordinary
+   * translation keys.
+   *
+   * ```ts
+   * const extensions = {
+   *   $exists({ ctx, keys }: tpath.ExtensionContext<{ messages: Record<string, string> }>) {
+   *     return ctx.messages[keys.join('.')] !== undefined;
+   *   },
+   * } satisfies tpath.ExtensionMap<{ messages: Record<string, string> }>;
+   * ```
+   */
   export type ExtensionMap<TContext extends object = {}> = Readonly<
     Record<`$${string}`, (context: ExtensionContext<TContext>, ...args: any[]) => unknown>
   >;
 
+  /**
+   * Typed translator proxy for a namespace and its registered extensions.
+   *
+   * Leaf calls return exactly what the formatter returns: a string or
+   * `undefined`.
+   */
   export type TPath<TNamespace, TExtensions extends ExtensionMap<any>> = _TPath<
     TNamespace,
     TExtensions
   >;
 
+  /**
+   * Chainable builder used to bind context types, extensions, and the formatter.
+   */
   export interface Builder<
     TNamespace,
     TContext extends object = {},
     TExtensions extends ExtensionMap<any> = {},
   > {
+    /**
+     * Adds required context fields to the translator factory.
+     *
+     * ```ts
+     * const createT = tpath<Translations>().ctx<{ locale: string }>().format(format);
+     * createT({ locale: 'en' });
+     * ```
+     */
     ctx<TNextContext extends object>(): Builder<TNamespace, TContext & TNextContext, TExtensions>;
+    /**
+     * Adds opt-in extension methods to every path node.
+     */
     extend<TNextExtensions extends ExtensionMap<TContext>>(
       extensions: TNextExtensions,
     ): Builder<TNamespace, TContext, TExtensions & TNextExtensions>;
+    /**
+     * Finishes the builder by registering the caller-owned formatter.
+     */
     format(formatMessage: FormatMessage<TContext>): Factory<TNamespace, TContext, TExtensions>;
   }
 
+  /**
+   * Translator factory produced by {@link Builder.format}.
+   *
+   * If no context type was declared, the factory is called with no arguments.
+   * Otherwise it requires the declared context.
+   */
   export type Factory<
     TNamespace,
     TContext extends object,
@@ -67,6 +165,13 @@ export namespace tpath {
     ? (ctx?: never) => TPath<TNamespace, TExtensions>
     : (ctx: Context<TContext>) => TPath<TNamespace, TExtensions>;
 
+  /**
+   * Type helper for selecting one or more namespaces from a translation tree.
+   *
+   * ```ts
+   * type CommonOnly = tpath.PickNs<Translations, ['common']>;
+   * ```
+   */
   export type PickNs<TNamespaces, Ns> = Ns extends
     | [infer F extends keyof TNamespaces, ...infer R]
     | readonly [infer F extends keyof TNamespaces, ...infer R]
@@ -74,6 +179,9 @@ export namespace tpath {
     : unknown;
 }
 
+/**
+ * Default export alias for {@link tpath}.
+ */
 export default tpath;
 
 type Trim<S extends string> = S extends
@@ -154,7 +262,8 @@ type TLeafFunction<
   TNamespace,
   K extends keyof TNamespace,
   TExtensions extends tpath.ExtensionMap<any>,
-> = ExtensionMethods<TExtensions> & ((...params: TFunctionParams<TNamespace, K>) => string);
+> = ExtensionMethods<TExtensions> &
+  ((...params: TFunctionParams<TNamespace, K>) => string | undefined);
 
 type _TPath<
   TNamespace,
@@ -203,22 +312,11 @@ function createTPathProxy<
   ctx: tpath.Context<TContext>,
 ): tpath.TPath<TNamespace, TExtensions> {
   function format(keys: readonly string[], interpolation?: object) {
-    const key = keys.join('.');
-
-    try {
-      const formatted = formatMessage({
-        ctx,
-        interpolation,
-        key,
-        keys,
-      });
-
-      return formatted ?? key;
-    } catch (error) {
-      console.error(`Message formatting error: ${String(error)}`);
-
-      return key;
-    }
+    return formatMessage({
+      ctx,
+      interpolation,
+      keys,
+    });
   }
 
   return new Proxy(() => undefined, {

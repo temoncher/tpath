@@ -42,10 +42,10 @@ function formatWithDebug(
 test('types nested translation paths', () => {
   const t = tpath<Translations>().format(() => 'value')();
 
-  assertType<string>(t.common.home.title());
-  assertType<string>(t.common.home.greeting({ name: 'Ada' }));
-  assertType<string>(t.common.home.score({ name: 'Ada', score: 7 }));
-  assertType<string>(t.admin.users.count({ count: 2 }));
+  assertType<string | undefined>(t.common.home.title());
+  assertType<string | undefined>(t.common.home.greeting({ name: 'Ada' }));
+  assertType<string | undefined>(t.common.home.score({ name: 'Ada', score: 7 }));
+  assertType<string | undefined>(t.admin.users.count({ count: 2 }));
 
   // @ts-expect-error missing namespace
   assertType<unknown>(t.missing);
@@ -76,7 +76,7 @@ test('does not accept context when no context type is declared', () => {
   const createT = tpath<Translations>().format(() => 'value');
   const t = createT();
 
-  assertType<string>(t.common.home.title());
+  assertType<string | undefined>(t.common.home.title());
 
   // @ts-expect-error no context argument is accepted without .ctx()
   createT({});
@@ -94,9 +94,8 @@ test('formats values through a required formatter instead of resolve', () => {
     .ctx<{
       readonly messages: Readonly<Record<string, string | undefined>>;
     }>()
-    .format(({ ctx, interpolation, key, keys }) => {
+    .format(({ ctx, interpolation, keys }) => {
       expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
-      assertType<string>(key);
       expectTypeOf(interpolation).toEqualTypeOf<object | undefined>();
       expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
 
@@ -109,7 +108,7 @@ test('formats values through a required formatter instead of resolve', () => {
     },
   });
 
-  assertType<string>(t.common.home.title());
+  assertType<string | undefined>(t.common.home.title());
 
   // @ts-expect-error factory requires the declared context
   createT();
@@ -131,7 +130,7 @@ test('types extension context and public extension arguments', () => {
       $({ format, keys }, child: string, interpolation?: object) {
         expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
         expectTypeOf(format).toEqualTypeOf<
-          (keys: readonly string[], interpolation?: object) => string
+          (keys: readonly string[], interpolation?: object) => string | undefined
         >();
 
         return format(appendKey(keys, child), interpolation);
@@ -153,7 +152,7 @@ test('types extension context and public extension arguments', () => {
     messages: {},
   });
 
-  assertType<string>(t.common.$('home.title'));
+  assertType<string | undefined>(t.common.$('home.title'));
   assertType<boolean>(t.common.home.title.$exists());
   assertType<boolean>(t.common.home.$exists('title'));
   assertType<boolean>(t.common.home.$loading('title'));

@@ -13,6 +13,7 @@ interpolation, debug-key rendering, and one small `$exists` extension.
 - The language selector swaps the nested dictionary passed into `createT`.
 - `ctx.messages` owns nested lookup data instead of a closure around a module variable.
 - `ctx.debug` makes the same factory render joined keys.
+- The formatter owns missing-message behavior; TPath does not add a fallback.
 - The `$exists` extension is opt-in and receives the same bound context as the formatter.
 - React owns form state; TPath owns path collection and formatting.
 

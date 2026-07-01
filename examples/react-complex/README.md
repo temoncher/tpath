@@ -23,6 +23,8 @@ flight.
 - Generated English messages imported in tests as stable mock values.
 - Async translation loading owned by React, with the shell and every route fetching only its own
   namespace file.
+- Missing translations, loading, and errors are represented by the caller-owned formatter and
+  extensions instead of built-in TPath fallback behavior.
 - `$loading`, an opt-in extension used to render text shimmers while translations load.
 - `$key`, an opt-in extension used to derive stable metadata keys from translation paths.
 - `$error`, an opt-in extension used to read namespace-level translation loading errors.
