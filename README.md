@@ -20,8 +20,9 @@ import { tpath } from './tpath';
 ## Basic Usage
 
 Describe your translation tree as a TypeScript type, then build a translator factory. TPath collects
-the path keys and calls your formatter. Your formatter decides how those keys map to dictionaries,
-namespaces, locales, remote data, parsing libraries, or anything else.
+the path keys and calls your `__call` definition when a leaf is invoked. That definition decides
+how those keys map to dictionaries, namespaces, locales, remote data, parsing libraries, or anything
+else.
 
 ```ts
 import { tpath } from './tpath';
@@ -42,7 +43,11 @@ const messages = {
 
 const createT = tpath<Translations>()
   .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
-  .format(({ ctx, keys }) => ctx.messages[keys.join('.')]);
+  .define({
+    __call(ctx, keys) {
+      return ctx.messages[keys.join('.')];
+    },
+  });
 
 const t = createT({ messages });
 
@@ -50,17 +55,17 @@ t.common.home.title(); // "Home"
 t.common.home.greeting({ name: 'Ada' }); // "Hello, {name}!"
 ```
 
-The `.format(...)` callback is required. TPath does not parse messages at runtime by itself.
-Interpolation types are still inferred from ICU MessageFormat-shaped string literals. The type-level
-parser is designed around the
+The `__call` definition is required before the builder can create translators. TPath does not
+parse messages at runtime by itself. Interpolation types are still inferred from ICU
+MessageFormat-shaped string literals. The type-level parser is designed around the
 [ICU message format](https://unicode-org.github.io/icu/userguide/format_parse/messages/?utm_source=chatgpt.com),
 but runtime parsing is deliberately caller-owned.
 
-The formatter also owns missing-translation and error behavior. TPath returns the formatter result
-as-is: if the formatter returns `undefined`, the translated call returns `undefined`; if the
-formatter throws, the error propagates to the caller.
+The call definition also owns missing-translation and error behavior. TPath returns the definition
+result as-is: if `__call` returns `undefined`, the translated call returns `undefined`; if `__call`
+throws, the error propagates to the caller.
 
-If you want ICU formatting with `intl-messageformat`, call it inside `.format(...)`:
+If you want ICU formatting with `intl-messageformat`, call it inside `__call`:
 
 ```sh
 pnpm add intl-messageformat
@@ -75,16 +80,18 @@ const createT = tpath<Translations>()
     readonly locale: string;
     readonly messages: Readonly<Record<string, string | undefined>>;
   }>()
-  .format(({ ctx, interpolation, keys }) => {
-    const message = ctx.messages[keys.join('.')];
+  .define({
+    __call(ctx, keys, interpolation) {
+      const message = ctx.messages[keys.join('.')];
 
-    if (message === undefined) {
-      return undefined;
-    }
+      if (message === undefined) {
+        return undefined;
+      }
 
-    return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
-      interpolation as any,
-    ) as string;
+      return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
+        interpolation as any,
+      ) as string;
+    },
   });
 
 const t = createT({
@@ -99,15 +106,17 @@ Missing translations are caller-owned:
 
 ```ts
 t.common.home.missing(); // TypeScript error
-t.common.home.title(); // undefined if format returns undefined
+t.common.home.title(); // undefined if __call returns undefined
 ```
 
-If you want joined-key fallback or debug output, return `keys.join('.')` from your formatter.
+If you want joined-key fallback or debug output, return `keys.join('.')` from `__call`.
 
 ## Caller-Owned Formatting
 
-The formatter receives the collected key path as an array and the context passed to the factory.
-TPath does not decide which part of the path is a namespace.
+The `__call` definition receives a `ctx` first argument with the context fields passed to the
+factory, then an explicit `keys` array for the collected path. The same path is also available on
+`ctx.keys` for helper methods that inspect the current node. TPath does not decide which part of
+the path is a namespace.
 
 ```ts
 const dictionaries = {
@@ -118,14 +127,16 @@ const dictionaries = {
 
 const createT = tpath<Translations>()
   .ctx<{ readonly dictionaries: typeof dictionaries }>()
-  .format(({ ctx, keys }) => {
-    const [namespace, ...messagePath] = keys;
+  .define({
+    __call(ctx, keys) {
+      const [namespace, ...messagePath] = keys;
 
-    if (namespace === undefined) {
-      return undefined;
-    }
+      if (namespace === undefined) {
+        return undefined;
+      }
 
-    return ctx.dictionaries[namespace]?.[messagePath.join('.')];
+      return ctx.dictionaries[namespace]?.[messagePath.join('.')];
+    },
   });
 
 const t = createT({ dictionaries });
@@ -137,10 +148,10 @@ That keeps storage policy outside the helper. You can join with dots, split on t
 load by locale, merge several dictionaries, provide a fallback, throw on missing keys, or use a
 completely different key strategy.
 
-## Extension Patterns
+## Definition Patterns
 
-Extensions are ordinary `$...` functions registered on the builder. TPath calls them with an
-extension context first, then forwards the user arguments from the proxy call.
+Definitions can include ordinary `$...` functions. TPath exposes them on every path node and passes
+the current path plus the factory context as the first `ctx` argument.
 
 ```ts
 const loadingKeys = new Set(['common.home.title']);
@@ -150,15 +161,20 @@ const createT = tpath<Translations>()
     readonly loadingKeys: ReadonlySet<string>;
     readonly messages: Readonly<Record<string, string | undefined>>;
   }>()
-  .extend({
-    $exists({ ctx, keys }, child?: string) {
-      return ctx.messages[(child === undefined ? keys : [...keys, child]).join('.')] !== undefined;
+  .define({
+    $exists(ctx, child?: string) {
+      return (
+        ctx.messages[(child === undefined ? ctx.keys : [...ctx.keys, child]).join('.')] !==
+        undefined
+      );
     },
-    $loading({ ctx, keys }, child?: string) {
-      return ctx.loadingKeys.has((child === undefined ? keys : [...keys, child]).join('.'));
+    $loading(ctx, child?: string) {
+      return ctx.loadingKeys.has((child === undefined ? ctx.keys : [...ctx.keys, child]).join('.'));
     },
-  })
-  .format(({ ctx, keys }) => ctx.messages[keys.join('.')]);
+    __call(ctx, keys) {
+      return ctx.messages[keys.join('.')];
+    },
+  });
 
 const t = createT({ loadingKeys, messages });
 
@@ -167,21 +183,23 @@ t.common.home.$exists('title'); // true
 t.common.home.title.$loading(); // true
 ```
 
-If you want a dynamic-key escape hatch, provide it as another extension:
+If you want a dynamic-key escape hatch, provide it as another `$...` method. Use the bound
+`ctx.__call(keys, interpolation)` helper to call `__call` for an explicit path without mutating the
+current path.
 
 ```ts
 const createT = tpath<Translations>()
   .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
-  .extend({
-    $({ format, keys }, child: string, interpolation?: object) {
-      return format([...keys, child], interpolation);
-    },
-  })
-  .format(({ ctx, interpolation, keys }) => {
-    const message = ctx.messages[keys.join('.')];
-    const values = interpolation as { readonly name: string };
+  .define({
+    __call(ctx, keys, interpolation) {
+      const message = ctx.messages[keys.join('.')];
+      const values = interpolation as { readonly name: string };
 
-    return message?.replace('{name}', values.name);
+      return message?.replace('{name}', values.name);
+    },
+    $(ctx, child: string, interpolation?: object) {
+      return ctx.__call([...ctx.keys, child], interpolation);
+    },
   });
 
 const t = createT({ messages });
@@ -189,10 +207,10 @@ const t = createT({ messages });
 t.common.$('home.greeting', { name: 'Ada' }); // "Hello, Ada!"
 ```
 
-TPath does not include built-in `$` or `$exists` methods. If an extension is not provided, it is not
+TPath does not include built-in `$` or `$exists` methods. If a `$...` method is not provided, it is not
 part of the typed proxy.
 
-The formatter and extensions receive the same context object passed to the factory:
+The call definition and named `$...` methods receive the same context fields passed to the factory:
 
 ```ts
 const createT = tpath<Translations>()
@@ -201,14 +219,18 @@ const createT = tpath<Translations>()
     readonly locale: string;
     readonly messages: Readonly<Record<string, string | undefined>>;
   }>()
-  .extend({
-    $locale: ({ ctx }) => ctx.locale,
-    $debug: ({ ctx }) => ctx.debug,
-  })
-  .format(({ ctx, keys }) => {
-    if (ctx.debug) return keys.join('.');
+  .define({
+    $locale(ctx) {
+      return ctx.locale;
+    },
+    $debug(ctx) {
+      return ctx.debug;
+    },
+    __call(ctx, keys) {
+      if (ctx.debug) return keys.join('.');
 
-    return ctx.messages[keys.join('.')];
+      return ctx.messages[keys.join('.')];
+    },
   });
 
 const t = createT({ debug: false, locale: 'en', messages });
@@ -219,7 +241,7 @@ t.common.home.title.$locale(); // "en"
 ## Debug Pattern
 
 TPath does not have built-in debug behavior. If you want every call to return the joined key, make
-that part of your formatter policy:
+that part of your `__call` policy:
 
 ```ts
 const createT = tpath<Translations>()
@@ -227,10 +249,12 @@ const createT = tpath<Translations>()
     readonly debug: boolean;
     readonly messages: Readonly<Record<string, string | undefined>>;
   }>()
-  .format(({ ctx, keys }) => {
-    if (ctx.debug) return keys.join('.');
+  .define({
+    __call(ctx, keys) {
+      if (ctx.debug) return keys.join('.');
 
-    return ctx.messages[keys.join('.')];
+      return ctx.messages[keys.join('.')];
+    },
   });
 
 const t = createT({ debug: true, messages });
@@ -254,7 +278,7 @@ pnpm format
 ## Examples
 
 The `examples/react-simple` app shows the builder API in a small React app with typed paths,
-context-bound messages, interpolation, debug-key rendering, and an opt-in extension.
+context-bound messages, interpolation, debug-key rendering, and an opt-in `$...` method.
 
 ```sh
 pnpm --dir examples/react-simple install
@@ -265,7 +289,7 @@ pnpm --dir examples/react-simple build
 
 The `examples/solid-simple` app mirrors `react-simple` in a small Solid app scaffolded with Vite.
 It uses the same nested dictionaries, translator context, interpolation, debug-key rendering, and
-opt-in extension.
+opt-in `$...` method.
 
 ```sh
 pnpm --dir examples/solid-simple install
@@ -276,7 +300,7 @@ pnpm --dir examples/solid-simple build
 
 The `examples/vue-simple` app mirrors `react-simple` in a small Vue app scaffolded with Vite.
 It uses the same nested dictionaries, translator context, interpolation, debug-key rendering, and
-opt-in extension.
+opt-in `$...` method.
 
 ```sh
 pnpm --dir examples/vue-simple install

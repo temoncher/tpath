@@ -30,54 +30,45 @@ interface TranslationContext {
 
 export const createT = tpath<Translations>()
   .ctx<TranslationContext>()
-  .extend({
+  .define({
+    /**
+     * Returns this translation path as a stable key for test ids and other metadata.
+     */
+    $key(ctx, child?: string) {
+      return (child === undefined ? ctx.keys : [...ctx.keys, child]).join(".");
+    },
+    __call(ctx, keys, interpolation) {
+      const message = ctx.messages[keys.join(".")];
+
+      if (message === undefined) {
+        return undefined;
+      }
+
+      return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
+        interpolation as any,
+      ) as string;
+    },
     /**
      * Resolves a runtime-provided child id under the current translation path.
      * Use it when the final key segment comes from fetched data instead of static code.
      */
-    $({ format, keys }, id: string, interpolation?: object) {
-      return format([...keys, id], interpolation);
-    },
-    /**
-     * Returns this translation path as a stable key for test ids and other metadata.
-     */
-    $key({ keys }, child?: string) {
-      return joinKeys(child === undefined ? keys : [...keys, child]);
+    $(ctx, id: string, interpolation?: object) {
+      return ctx.__call([...ctx.keys, id], interpolation);
     },
     /**
      * Returns this path's namespace-level loading error, if loading failed.
      */
-    $error({ ctx, keys }, child?: string) {
-      return (
-        ctx.errorNamespaces.get(namespaceForPath(child === undefined ? keys : [...keys, child])) ??
-        null
-      );
+    $error(ctx, child?: string) {
+      return ctx.errorNamespaces.get(namespaceForKey(ctx.$key(child))) ?? null;
     },
     /**
      * Reports whether this path's translation namespace is still loading.
      */
-    $loading({ ctx, keys }, child?: string) {
-      return ctx.loadingNamespaces.has(
-        namespaceForPath(child === undefined ? keys : [...keys, child]),
-      );
+    $loading(ctx, child?: string) {
+      return ctx.loadingNamespaces.has(namespaceForKey(ctx.$key(child)));
     },
-  })
-  .format(({ ctx, interpolation, keys }) => {
-    const message = ctx.messages[joinKeys(keys)];
-
-    if (message === undefined) {
-      return undefined;
-    }
-
-    return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
-      interpolation as any,
-    ) as string;
   });
 
-function joinKeys(keys: readonly string[]) {
-  return keys.join(".");
-}
-
-function namespaceForPath(keys: readonly string[]): TranslationNamespace {
-  return keys[0] as TranslationNamespace;
+function namespaceForKey(key: string): TranslationNamespace {
+  return key.split(".", 1)[0] as TranslationNamespace;
 }

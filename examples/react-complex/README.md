@@ -23,12 +23,12 @@ flight.
 - Generated English messages imported in tests as stable mock values.
 - Async translation loading owned by React, with the shell and every route fetching only its own
   namespace file.
-- Missing translations, loading, and errors are represented by the caller-owned formatter and
-  extensions instead of built-in TPath fallback behavior.
-- `$loading`, an opt-in extension used to render text shimmers while translations load.
-- `$key`, an opt-in extension used to derive stable metadata keys from translation paths.
-- `$error`, an opt-in extension used to read namespace-level translation loading errors.
-- `$`, an opt-in id lookup extension used for server-provided issue status ids.
+- Missing translations, loading, and errors are represented by caller-owned `__call` and `$...`
+  methods instead of built-in TPath fallback behavior.
+- `$loading`, an opt-in method used to render text shimmers while translations load.
+- `$key`, an opt-in method used to derive stable metadata keys from translation paths.
+- `$error`, an opt-in method used to read namespace-level translation loading errors.
+- `$`, an opt-in id lookup method used for server-provided issue status ids.
 - A GitHub API app split by feature folder, with route components, services, and stories living
   together.
 - Shell-owned deps for routing, GitHub HTTP, and static translation loading.
@@ -71,8 +71,8 @@ pnpm build
 ## Files To Read
 
 - `tools/generate-translations.ts` contains the flat-JSON to nested-TS generator.
-- `src/shared/createT.ts` contains the TPath factory, formatter, `$`, `$key`,
-  `$error`, and `$loading`.
+- `src/shared/createT.ts` contains the TPath factory, `__call`, `$`, `$key`, `$error`, and
+  `$loading`.
 - `src/shared/useT.ts` contains async locale query composition.
 - `src/app/shellDeps.ts` contains static translation JSON loading for the app shell.
 - `src/app/AppShell.tsx` builds shell services and displays translation shimmers.

@@ -2,26 +2,30 @@
  * Creates a typed translation path builder for a translation tree.
  *
  * The builder collects property names into a path and delegates every runtime
- * lookup, fallback, interpolation, and error policy to the formatter passed to
- * {@link tpath.Builder.format}.
+ * lookup, fallback, interpolation, and error policy to the `__call` method
+ * registered with {@link tpath.Builder.define}.
  *
  * ```ts
  * const messages = { 'common.home.title': 'Home' };
  * const createT = tpath<{ common: { home: { title: 'Home' } } }>()
  *     .ctx<{ messages: typeof messages }>()
- *     .format(({ keys, ctx }) => ctx.messages[keys.join('.')]);
+ *     .define({
+ *       __call(ctx, keys) {
+ *         return ctx.messages[keys.join('.')];
+ *       },
+ *     });
  * const t = createT({ messages });
  *
  * t.common.home.title(); // "Home"
  * ```
  */
 export function tpath<TNamespace>(): tpath.Builder<TNamespace> {
-  return createTPathBuilder<TNamespace, {}, {}>({});
+  return createTPathBuilder<TNamespace, {}>();
 }
 
 /**
  * Public types that describe TPath builders, factories, translators, and
- * extension callbacks.
+ * definition callbacks.
  */
 export namespace tpath {
   /**
@@ -34,136 +38,132 @@ export namespace tpath {
   export type Context<TUserContext extends object = {}> = Readonly<TUserContext>;
 
   /**
-   * Data passed as the first argument to every extension method.
+   * Bound helper exposed inside definition methods.
+   *
+   * Calls the `__call` definition for explicit keys.
    */
-  export interface ExtensionContext<TContext extends object = {}> {
+  export type CallHelper = (keys: readonly string[], interpolation?: object) => string | undefined;
+
+  /**
+   * Definition object passed to {@link Builder.define}.
+   *
+   * `__call` is required and handles leaf calls. `$...` methods are exposed on
+   * every translated path node.
+   */
+  export type Definition = Readonly<{
+    readonly __call: (
+      ctx: DefinitionContext<any, any>,
+      keys: readonly string[],
+      interpolation?: object,
+    ) => string | undefined;
+  }>;
+
+  /**
+   * Definition object shape accepted by {@link Builder.define}.
+   */
+  export type DefinitionInput<TContext extends object> = Readonly<{
+    readonly __call: (
+      ctx: DefinitionContext<TContext, any>,
+      keys: readonly string[],
+      interpolation?: object,
+    ) => string | undefined;
+  }> &
+    Readonly<{
+      readonly [key: `$${string}`]: (ctx: DefinitionContext<TContext, any>, ...args: any[]) => any;
+    }>;
+
+  /**
+   * Result of {@link Builder.define}. Missing or invalid `__call` definitions
+   * produce `never`, so the builder cannot be used as a translator factory.
+   */
+  export type DefineResult<TNamespace, TContext extends object, TDefinition extends object> =
+    TDefinition extends DefinitionInput<TContext>
+      ? Factory<TNamespace, TContext, TDefinition>
+      : never;
+
+  /**
+   * Bound `$...` helpers exposed on translated path nodes and inside definition
+   * methods.
+   */
+  export type DefinitionHelpers<TDefinition> =
+    IsAny<TDefinition> extends true
+      ? { readonly [key: `$${string}`]: (...args: any[]) => any }
+      : {
+          readonly [K in keyof TDefinition as K extends `$${string}` ? K : never]: DefinitionMethod<
+            TDefinition[K]
+          >;
+        };
+
+  /**
+   * Runtime context value passed as the first argument to every definition
+   * method.
+   */
+  export type DefinitionContext<
+    TContext extends object,
+    TDefinition extends object,
+  > = Context<TContext> & {
     /**
-     * The context object passed to the translator factory.
-     */
-    readonly ctx: Context<TContext>;
-    /**
-     * Formats an explicit path from inside an extension.
-     *
-     * ```ts
-     * const extensions = {
-     *   $({ format, keys }: tpath.ExtensionContext, child: string) {
-     *     return format([...keys, child]);
-     *   },
-     * };
-     * ```
-     */
-    readonly format: (keys: readonly string[], interpolation?: object) => string | undefined;
-    /**
-     * The collected path at the extension call site.
+     * The collected path at the current call site.
      */
     readonly keys: readonly string[];
-  }
-
-  /**
-   * Data passed to the formatter when a translated leaf is invoked.
-   */
-  export interface FormatContext<TContext extends object = {}> {
     /**
-     * The context object passed to the translator factory.
+     * Calls the `__call` definition for explicit keys.
      */
-    readonly ctx: Context<TContext>;
-    /**
-     * Interpolation values from the leaf call, or `undefined` when the message
-     * type does not require interpolation.
-     */
-    readonly interpolation: object | undefined;
-    /**
-     * The collected translation path.
-     */
-    readonly keys: readonly string[];
-  }
+    readonly __call: CallHelper;
+  } & DefinitionHelpers<TDefinition> & {
+      readonly [key: `$${string}`]: (...args: any[]) => any;
+    };
 
   /**
-   * Formatter callback used by {@link Builder.format}.
-   *
-   * Return the translated string, or `undefined` when your lookup policy has no
-   * value for the path. Thrown errors are left for the caller to handle.
-   *
-   * ```ts
-   * const format: tpath.FormatMessage<{ messages: Record<string, string> }> = ({ ctx, keys }) =>
-   *   ctx.messages[keys.join('.')];
-   * ```
+   * Removes the internal context parameter from a definition method.
    */
-  export type FormatMessage<TContext extends object = {}> = (
-    context: FormatContext<TContext>,
-  ) => string | undefined;
+  export type DefinitionMethod<T> = T extends (...args: infer TArgs) => infer R
+    ? TArgs extends [ctx: unknown, ...args: infer TPublicArgs]
+      ? (...args: TPublicArgs) => R
+      : never
+    : never;
 
   /**
-   * Map of opt-in extension methods exposed on every path node.
+   * Typed translator proxy for a namespace and its registered `$...` helpers.
    *
-   * Extension names must start with `$` so they do not collide with ordinary
-   * translation keys.
-   *
-   * ```ts
-   * const extensions = {
-   *   $exists({ ctx, keys }: tpath.ExtensionContext<{ messages: Record<string, string> }>) {
-   *     return ctx.messages[keys.join('.')] !== undefined;
-   *   },
-   * } satisfies tpath.ExtensionMap<{ messages: Record<string, string> }>;
-   * ```
+   * Leaf calls return exactly what `__call` returns: a string or `undefined`.
    */
-  export type ExtensionMap<TContext extends object = {}> = Readonly<
-    Record<`$${string}`, (context: ExtensionContext<TContext>, ...args: any[]) => unknown>
-  >;
+  export type TPath<TNamespace, TDefinition extends object = {}> = _TPath<TNamespace, TDefinition>;
 
   /**
-   * Typed translator proxy for a namespace and its registered extensions.
-   *
-   * Leaf calls return exactly what the formatter returns: a string or
-   * `undefined`.
+   * Chainable builder used to bind context types and the terminal definition.
    */
-  export type TPath<TNamespace, TExtensions extends ExtensionMap<any>> = _TPath<
-    TNamespace,
-    TExtensions
-  >;
-
-  /**
-   * Chainable builder used to bind context types, extensions, and the formatter.
-   */
-  export interface Builder<
-    TNamespace,
-    TContext extends object = {},
-    TExtensions extends ExtensionMap<any> = {},
-  > {
+  export interface Builder<TNamespace, TContext extends object = {}> {
     /**
      * Adds required context fields to the translator factory.
      *
      * ```ts
-     * const createT = tpath<Translations>().ctx<{ locale: string }>().format(format);
+     * const createT = tpath<Translations>()
+     *   .ctx<{ locale: string }>()
+     *   .define({ __call(ctx) { return ctx.locale; } });
      * createT({ locale: 'en' });
      * ```
      */
-    ctx<TNextContext extends object>(): Builder<TNamespace, TContext & TNextContext, TExtensions>;
+    ctx<TNextContext extends object>(): Builder<TNamespace, TContext & TNextContext>;
     /**
-     * Adds opt-in extension methods to every path node.
+     * Finishes the builder by registering the caller-owned definition.
      */
-    extend<TNextExtensions extends ExtensionMap<TContext>>(
-      extensions: TNextExtensions,
-    ): Builder<TNamespace, TContext, TExtensions & TNextExtensions>;
-    /**
-     * Finishes the builder by registering the caller-owned formatter.
-     */
-    format(formatMessage: FormatMessage<TContext>): Factory<TNamespace, TContext, TExtensions>;
+    define<TDefinition extends DefinitionInput<TContext>>(
+      definition: TDefinition,
+    ): Factory<TNamespace, TContext, TDefinition>;
   }
 
   /**
-   * Translator factory produced by {@link Builder.format}.
+   * Translator factory produced by {@link Builder.define}.
    *
    * If no context type was declared, the factory is called with no arguments.
    * Otherwise it requires the declared context.
    */
-  export type Factory<
-    TNamespace,
-    TContext extends object,
-    TExtensions extends ExtensionMap<any>,
-  > = [keyof TContext] extends [never]
-    ? (ctx?: never) => TPath<TNamespace, TExtensions>
-    : (ctx: Context<TContext>) => TPath<TNamespace, TExtensions>;
+  export type Factory<TNamespace, TContext extends object, TDefinition extends object> = [
+    keyof TContext,
+  ] extends [never]
+    ? (ctx?: never) => TPath<TNamespace, TDefinition>
+    : (ctx: Context<TContext>) => TPath<TNamespace, TDefinition>;
 
   /**
    * Type helper for selecting one or more namespaces from a translation tree.
@@ -238,6 +238,7 @@ type ParseOneLevelOfInterpolation<S extends string> = S extends `${string}{${inf
 type GetInterpolationKeys<S extends string> = DetectICU<ParseOneLevelOfInterpolation<S>>;
 
 type Prettify<T> = { [K in keyof T]: T[K] } & {};
+type IsAny<T> = 0 extends 1 & T ? true : false;
 type InterpolationValues<S extends string> = Readonly<
   Record<GetInterpolationKeys<S>, string | number>
 >;
@@ -247,78 +248,47 @@ type TFunctionParams<TNamespace, TKey extends keyof TNamespace> = TNamespace[TKe
     : []
   : never;
 
-type StripContext<T> = T extends (
-  context: tpath.ExtensionContext<any>,
-  ...args: infer TArgs
-) => infer R
-  ? (...args: TArgs) => R
-  : never;
-
-type ExtensionMethods<TExtensions extends tpath.ExtensionMap<any>> = {
-  readonly [K in keyof TExtensions]: StripContext<TExtensions[K]>;
-};
-
 type TLeafFunction<
   TNamespace,
   K extends keyof TNamespace,
-  TExtensions extends tpath.ExtensionMap<any>,
-> = ExtensionMethods<TExtensions> &
+  TDefinition extends object,
+> = tpath.DefinitionHelpers<ExtractDefinition<TDefinition>> &
   ((...params: TFunctionParams<TNamespace, K>) => string | undefined);
 
-type _TPath<
-  TNamespace,
-  TExtensions extends tpath.ExtensionMap<any>,
-> = ExtensionMethods<TExtensions> & {
+type _TPath<TNamespace, TDefinition extends object> = tpath.DefinitionHelpers<
+  ExtractDefinition<TDefinition>
+> & {
   readonly [K in keyof TNamespace]: TNamespace[K] extends string
-    ? TLeafFunction<TNamespace, K, TExtensions>
-    : _TPath<TNamespace[K], TExtensions>;
+    ? TLeafFunction<TNamespace, K, TDefinition>
+    : _TPath<TNamespace[K], TDefinition>;
 };
 
-function createTPathBuilder<
+type ExtractDefinition<TDefinition extends object> = TDefinition;
+
+function createTPathBuilder<TNamespace, TContext extends object>(): tpath.Builder<
   TNamespace,
-  TContext extends object,
-  TExtensions extends tpath.ExtensionMap<any>,
->(extensions: TExtensions): tpath.Builder<TNamespace, TContext, TExtensions> {
+  TContext
+> {
   return {
     ctx<TNextContext extends object>() {
-      return createTPathBuilder<TNamespace, TContext & TNextContext, TExtensions>(extensions);
+      return createTPathBuilder<TNamespace, TContext & TNextContext>();
     },
-    extend<TNextExtensions extends tpath.ExtensionMap<TContext>>(nextExtensions: TNextExtensions) {
-      return createTPathBuilder<TNamespace, TContext, TExtensions & TNextExtensions>({
-        ...extensions,
-        ...nextExtensions,
-      });
-    },
-    format(formatMessage) {
+    define<TDefinition extends tpath.DefinitionInput<TContext>>(definition: TDefinition) {
       return ((ctx = {} as tpath.Context<TContext>) =>
-        createTPathProxy<TNamespace, TContext, TExtensions>(
-          formatMessage,
-          extensions,
+        createTPathProxy<TNamespace, TContext, TDefinition>(
+          definition as unknown as TDefinition & tpath.Definition,
           [],
           ctx,
-        )) as tpath.Factory<TNamespace, TContext, TExtensions>;
+        )) as tpath.DefineResult<TNamespace, TContext, TDefinition>;
     },
   };
 }
 
-function createTPathProxy<
-  TNamespace,
-  TContext extends object,
-  TExtensions extends tpath.ExtensionMap<any>,
->(
-  formatMessage: tpath.FormatMessage<TContext>,
-  extensions: TExtensions,
+function createTPathProxy<TNamespace, TContext extends object, TDefinition extends object>(
+  definition: TDefinition & tpath.Definition,
   previousPath: readonly string[],
   ctx: tpath.Context<TContext>,
-): tpath.TPath<TNamespace, TExtensions> {
-  function format(keys: readonly string[], interpolation?: object) {
-    return formatMessage({
-      ctx,
-      interpolation,
-      keys,
-    });
-  }
-
+): tpath.TPath<TNamespace, TDefinition> {
   return new Proxy(() => undefined, {
     get(_target, key) {
       if (typeof key === 'symbol') {
@@ -327,31 +297,75 @@ function createTPathProxy<
         );
       }
 
-      const extension = (
-        extensions as Readonly<
-          Record<
-            string,
-            ((context: tpath.ExtensionContext<TContext>, ...args: unknown[]) => unknown) | undefined
-          >
-        >
-      )[key];
+      if (key === '__call') {
+        throw new TypeError('__call is reserved for tpath definitions.');
+      }
+
+      const extension = getExtension(definition, key);
 
       if (extension !== undefined) {
         return (...args: unknown[]) =>
-          extension(
-            {
-              ctx,
-              format,
-              keys: previousPath,
-            },
-            ...args,
-          );
+          extension(createDefinitionContext(definition, previousPath, ctx), ...args);
       }
 
-      return createTPathProxy(formatMessage, extensions, [...previousPath, key], ctx);
+      return createTPathProxy(definition, [...previousPath, key], ctx);
     },
     apply(_target, _thisArg, argArray: unknown[]) {
-      return format(previousPath, argArray[0] as object | undefined);
+      return callDefinition(definition, previousPath, ctx, argArray[0] as object | undefined);
     },
-  }) as unknown as tpath.TPath<TNamespace, TExtensions>;
+  }) as unknown as tpath.TPath<TNamespace, TDefinition>;
+}
+
+function callDefinition<TContext extends object, TDefinition extends object>(
+  definition: TDefinition & tpath.Definition,
+  keys: readonly string[],
+  ctx: tpath.Context<TContext>,
+  interpolation: object | undefined,
+) {
+  const definitionContext = createDefinitionContext(definition, keys, ctx);
+
+  return definition.__call(definitionContext, definitionContext.keys, interpolation);
+}
+
+function createDefinitionContext<TContext extends object, TDefinition extends object>(
+  definition: TDefinition & tpath.Definition,
+  keys: readonly string[],
+  ctx: tpath.Context<TContext>,
+): tpath.DefinitionContext<TContext, TDefinition> {
+  const currentKeys = Object.freeze([...keys]);
+  const self: Record<PropertyKey, unknown> = {
+    ...ctx,
+    keys: currentKeys,
+    __call(nextKeys: readonly string[], nextInterpolation?: object) {
+      return callDefinition(definition, nextKeys, ctx, nextInterpolation);
+    },
+  };
+
+  for (const key of Object.keys(definition)) {
+    if (!key.startsWith('$')) {
+      continue;
+    }
+
+    const extension = getExtension(definition, key);
+
+    if (extension !== undefined) {
+      self[key] = (...args: unknown[]) =>
+        extension(createDefinitionContext(definition, currentKeys, ctx), ...args);
+    }
+  }
+
+  return self as tpath.DefinitionContext<TContext, TDefinition>;
+}
+
+function getExtension<TDefinition extends object>(
+  definition: TDefinition & tpath.Definition,
+  key: string,
+) {
+  if (!key.startsWith('$')) {
+    return undefined;
+  }
+
+  return (definition as Readonly<Record<string, ((...args: unknown[]) => unknown) | undefined>>)[
+    key
+  ];
 }

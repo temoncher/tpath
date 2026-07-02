@@ -17,27 +17,27 @@ interface TranslationContext {
 
 export const createT = tpath<Translations>()
   .ctx<TranslationContext>()
-  .extend({
-    $exists({ ctx, keys }, child?: string) {
-      const nextKeys = child === undefined ? keys : [...keys, child];
+  .define({
+    $exists(ctx, child?: string) {
+      const nextKeys = child === undefined ? ctx.keys : [...ctx.keys, child];
 
       return resolveNested(ctx.messages, nextKeys) !== undefined;
     },
-  })
-  .format(({ ctx, interpolation, keys }) => {
-    if (ctx.debug) {
-      return keys.join(".");
-    }
+    __call(ctx, keys, interpolation) {
+      if (ctx.debug) {
+        return keys.join(".");
+      }
 
-    const message = resolveNested(ctx.messages, keys);
+      const message = resolveNested(ctx.messages, keys);
 
-    if (message === undefined) {
-      return undefined;
-    }
+      if (message === undefined) {
+        return undefined;
+      }
 
-    return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
-      interpolation as any,
-    ) as string;
+      return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
+        interpolation as any,
+      ) as string;
+    },
   });
 
 const translations = {
