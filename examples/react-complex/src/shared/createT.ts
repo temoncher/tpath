@@ -29,14 +29,8 @@ interface TranslationContext {
   readonly messages: TranslationMessages;
 }
 
-export const createT = tpath<TranslationPath<Translations>, TranslationContext>().define({
-  /**
-   * Returns this translation path as a stable key for test ids and other metadata.
-   */
-  $key(ctx, key?: string) {
-    return (key === undefined ? ctx.keys : [...ctx.keys, key]).join(".");
-  },
-  __call(ctx, keys, interpolation) {
+export const createT = tpath<TranslationPath<Translations>, TranslationContext>().define(
+  (ctx, keys, interpolation) => {
     const message = ctx.messages[keys.join(".")];
 
     if (message === undefined) {
@@ -47,26 +41,34 @@ export const createT = tpath<TranslationPath<Translations>, TranslationContext>(
       interpolation as any,
     ) as string;
   },
-  /**
-   * Resolves a runtime-provided key segment under the current translation path.
-   * Use it when the final key segment comes from fetched data instead of static code.
-   */
-  $(ctx, id: string, interpolation?: object) {
-    return ctx.__call<string | undefined>([...ctx.keys, id], interpolation);
+  {
+    /**
+     * Returns this translation path as a stable key for test ids and other metadata.
+     */
+    $key(ctx, key?: string) {
+      return (key === undefined ? ctx.keys : [...ctx.keys, key]).join(".");
+    },
+    /**
+     * Resolves a runtime-provided key segment under the current translation path.
+     * Use it when the final key segment comes from fetched data instead of static code.
+     */
+    $(ctx, id: string, interpolation?: object) {
+      return ctx.resolve([...ctx.keys, id], interpolation) as string | undefined;
+    },
+    /**
+     * Returns this path's namespace-level loading error, if loading failed.
+     */
+    $error(ctx, key?: string) {
+      return ctx.errorNamespaces.get(namespaceForKey(ctx.$key(key))) ?? null;
+    },
+    /**
+     * Reports whether this path's translation namespace is still loading.
+     */
+    $loading(ctx, key?: string) {
+      return ctx.loadingNamespaces.has(namespaceForKey(ctx.$key(key)));
+    },
   },
-  /**
-   * Returns this path's namespace-level loading error, if loading failed.
-   */
-  $error(ctx, key?: string) {
-    return ctx.errorNamespaces.get(namespaceForKey(ctx.$key(key))) ?? null;
-  },
-  /**
-   * Reports whether this path's translation namespace is still loading.
-   */
-  $loading(ctx, key?: string) {
-    return ctx.loadingNamespaces.has(namespaceForKey(ctx.$key(key)));
-  },
-});
+);
 
 function namespaceForKey(key: string): TranslationNamespace {
   return key.split(".", 1)[0] as TranslationNamespace;

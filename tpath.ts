@@ -2,7 +2,7 @@
  * Creates a typed proxy path definer.
  *
  * TPath collects property names into a string path, then delegates runtime
- * behavior to the `__call` method registered with
+ * behavior to the resolve function registered with
  * {@link tpath.Definer.define}. Use nested objects for path segments and
  * function leaves for typed call sites.
  *
@@ -18,12 +18,10 @@
  *   readonly messages: Readonly<Record<string, string | undefined>>;
  * };
  *
- * const createT = tpath<Translations, TranslationContext>().define({
- *   __call(ctx, keys, values) {
+ * const createT = tpath<Translations, TranslationContext>().define((ctx, keys, values) => {
  *     const message = ctx.messages[keys.join('.')];
  *
  *     return values === undefined ? message : message?.replace('{name}', values.name);
- *   },
  * });
  *
  * const t = createT({
@@ -76,47 +74,42 @@ export namespace tpath {
   /**
    * Bound helper exposed inside definition methods.
    *
-   * Calls the `__call` definition for explicit keys.
+   * Resolves the definition for explicit keys.
    */
-  export type CallHelper = <TReturn = unknown>(keys: readonly string[], ...args: any[]) => TReturn;
+  export type ResolveHelper = <TReturn = unknown>(
+    keys: readonly string[],
+    ...args: any[]
+  ) => TReturn;
 
   /**
-   * Definition object passed to {@link Definer.define}.
-   *
-   * `__call` is required and handles leaf calls. `$...` and symbol-keyed
-   * methods are exposed on every path node.
+   * Resolve function passed to {@link Definer.define}.
    */
-  export type Definition = Readonly<{
-    readonly __call: (
-      ctx: DefinitionContext<any, any>,
-      keys: readonly string[],
-      ...args: any[]
-    ) => unknown;
+  export type DefinitionResolve<TContext extends object, TDefinition extends object> = (
+    ctx: DefinitionContext<TContext, TDefinition>,
+    keys: readonly string[],
+    ...args: any[]
+  ) => unknown;
+
+  /**
+   * Extension object shape accepted by {@link Definer.define}.
+   */
+  export type DefinitionInput<TContext extends object, TDefinition extends object> = Readonly<{
+    readonly [K in keyof TDefinition]: TDefinition[K] extends (
+      ctx: unknown,
+      ...args: infer TArgs
+    ) => infer R
+      ? (ctx: DefinitionContext<TContext, TDefinition>, ...args: TArgs) => R
+      : never;
   }>;
 
   /**
-   * Definition object shape accepted by {@link Definer.define}.
+   * Result of {@link Definer.define}.
    */
-  export type DefinitionInput<TContext extends object> = Readonly<{
-    readonly __call: (
-      ctx: DefinitionContext<TContext, any>,
-      keys: readonly string[],
-      ...args: any[]
-    ) => unknown;
-  }> &
-    Readonly<{
-      readonly [key: `$${string}`]: (ctx: DefinitionContext<TContext, any>, ...args: any[]) => any;
-      readonly [key: symbol]: (ctx: DefinitionContext<TContext, any>, ...args: any[]) => any;
-    }>;
-
-  /**
-   * Result of {@link Definer.define}. Missing or invalid `__call` definitions
-   * produce `never`, so the definer cannot be used as a path factory.
-   */
-  export type DefineResult<TNamespace, TContext extends object, TDefinition extends object> =
-    TDefinition extends DefinitionInput<TContext>
-      ? Factory<TNamespace, TContext, TDefinition>
-      : never;
+  export type DefineResult<
+    TNamespace,
+    TContext extends object,
+    TDefinition extends object,
+  > = Factory<TNamespace, TContext, TDefinition>;
 
   /**
    * Bound extension helpers exposed on path nodes and inside definition methods.
@@ -127,9 +120,7 @@ export namespace tpath {
           readonly [key: symbol]: (...args: any[]) => any;
         }
       : {
-          readonly [K in keyof TDefinition as K extends `$${string}` | symbol
-            ? K
-            : never]: DefinitionMethod<TDefinition[K]>;
+          readonly [K in keyof TDefinition]: DefinitionMethod<TDefinition[K]>;
         };
 
   /**
@@ -145,16 +136,16 @@ export namespace tpath {
      */
     readonly keys: readonly string[];
     /**
-     * Calls the `__call` definition for explicit keys.
+     * Resolves explicit keys through the same caller-owned resolve function.
      */
-    readonly __call: CallHelper;
+    readonly resolve: ResolveHelper;
   } & DefinitionHelpers<TDefinition> & {
       readonly [key: `$${string}`]: (...args: any[]) => any;
       readonly [key: symbol]: (...args: any[]) => any;
     };
 
   /**
-   * Removes the internal context parameter from a definition method.
+   * Removes the internal context parameter from an extension method.
    */
   export type DefinitionMethod<T> = T extends (...args: infer TArgs) => infer R
     ? TArgs extends [ctx: unknown, ...args: infer TPublicArgs]
@@ -166,7 +157,7 @@ export namespace tpath {
    * Typed proxy for a path tree and its registered `$...` helpers.
    *
    * Function leaves keep their declared public argument and return types. The
-   * runtime value still comes from the caller-owned `__call` definition.
+   * runtime value still comes from the caller-owned resolve function.
    */
   export type TPath<TPathTree, TDefinition extends object = {}> = _TPath<TPathTree, TDefinition>;
 
@@ -177,9 +168,14 @@ export namespace tpath {
     /**
      * Finishes the definer by registering the caller-owned definition.
      */
-    define<TDefinition extends DefinitionInput<TContext>>(
+    define<TDefinition extends Record<string, DefinitionFunction>>(
+      resolve: DefinitionResolve<TContext, any>,
       definition: TDefinition,
     ): Factory<TPathTree, TContext, TDefinition>;
+    define(
+      resolve: DefinitionResolve<TContext, {}>,
+      definition?: undefined,
+    ): Factory<TPathTree, TContext, {}>;
   }
 
   /**
@@ -202,6 +198,13 @@ export default tpath;
 
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
+type DefinitionFunction = (ctx: any, ...args: any[]) => any;
+
+type RuntimeDefinition<TContext extends object, TDefinition extends object> = Readonly<{
+  readonly resolve: tpath.DefinitionResolve<TContext, TDefinition>;
+  readonly extensions: TDefinition;
+}>;
+
 type TLeafFunction<TLeaf, TDefinition extends object> = tpath.DefinitionHelpers<
   ExtractDefinition<TDefinition>
 > &
@@ -223,10 +226,18 @@ function createTPathDefiner<TPathTree, TContext extends object>(): tpath.Definer
   TContext
 > {
   return {
-    define<TDefinition extends tpath.DefinitionInput<TContext>>(definition: TDefinition) {
+    define<TDefinition extends Record<string, DefinitionFunction>>(
+      resolve: tpath.DefinitionResolve<TContext, any>,
+      definition?: TDefinition,
+    ) {
+      const runtimeDefinition: RuntimeDefinition<TContext, TDefinition> = {
+        resolve: resolve as tpath.DefinitionResolve<TContext, TDefinition>,
+        extensions: (definition ?? {}) as TDefinition,
+      };
+
       return ((ctx = {} as tpath.Context<TContext>) =>
         createTPathProxy<TPathTree, TContext, TDefinition>(
-          definition as unknown as TDefinition & tpath.Definition,
+          runtimeDefinition,
           [],
           ctx,
         )) as tpath.DefineResult<TPathTree, TContext, TDefinition>;
@@ -235,7 +246,7 @@ function createTPathDefiner<TPathTree, TContext extends object>(): tpath.Definer
 }
 
 function createTPathProxy<TPathTree, TContext extends object, TDefinition extends object>(
-  definition: TDefinition & tpath.Definition,
+  definition: RuntimeDefinition<TContext, TDefinition>,
   previousPath: readonly string[],
   ctx: tpath.Context<TContext>,
 ): tpath.TPath<TPathTree, TDefinition> {
@@ -262,24 +273,24 @@ function createTPathProxy<TPathTree, TContext extends object, TDefinition extend
       return createTPathProxy(definition, [...previousPath, key], ctx);
     },
     apply(_target, _thisArg, argArray: unknown[]) {
-      return callDefinition(definition, previousPath, ctx, argArray);
+      return resolveDefinition(definition, previousPath, ctx, argArray);
     },
   }) as unknown as tpath.TPath<TPathTree, TDefinition>;
 }
 
-function callDefinition<TContext extends object, TDefinition extends object>(
-  definition: TDefinition & tpath.Definition,
+function resolveDefinition<TContext extends object, TDefinition extends object>(
+  definition: RuntimeDefinition<TContext, TDefinition>,
   keys: readonly string[],
   ctx: tpath.Context<TContext>,
   args: readonly unknown[],
 ) {
   const definitionContext = createDefinitionContext(definition, keys, ctx);
 
-  return definition.__call(definitionContext, definitionContext.keys, ...args);
+  return definition.resolve(definitionContext, definitionContext.keys, ...args);
 }
 
 function createDefinitionContext<TContext extends object, TDefinition extends object>(
-  definition: TDefinition & tpath.Definition,
+  definition: RuntimeDefinition<TContext, TDefinition>,
   keys: readonly string[],
   ctx: tpath.Context<TContext>,
 ): tpath.DefinitionContext<TContext, TDefinition> {
@@ -287,16 +298,12 @@ function createDefinitionContext<TContext extends object, TDefinition extends ob
   const self: Record<PropertyKey, unknown> = {
     ...ctx,
     keys: currentKeys,
-    __call<TReturn = unknown>(nextKeys: readonly string[], ...nextArgs: any[]) {
-      return callDefinition(definition, nextKeys, ctx, nextArgs) as TReturn;
+    resolve<TReturn = unknown>(nextKeys: readonly string[], ...nextArgs: any[]) {
+      return resolveDefinition(definition, nextKeys, ctx, nextArgs) as TReturn;
     },
   };
 
-  for (const key of Reflect.ownKeys(definition)) {
-    if (typeof key === 'string' && !key.startsWith('$')) {
-      continue;
-    }
-
+  for (const key of Reflect.ownKeys(definition.extensions)) {
     const extension = getExtension(definition, key);
 
     if (extension !== undefined) {
@@ -308,15 +315,11 @@ function createDefinitionContext<TContext extends object, TDefinition extends ob
   return self as tpath.DefinitionContext<TContext, TDefinition>;
 }
 
-function getExtension<TDefinition extends object>(
-  definition: TDefinition & tpath.Definition,
+function getExtension<TContext extends object, TDefinition extends object>(
+  definition: RuntimeDefinition<TContext, TDefinition>,
   key: PropertyKey,
 ) {
-  if (typeof key === 'string' && !key.startsWith('$')) {
-    return undefined;
-  }
-
-  const value = (definition as Readonly<Record<PropertyKey, unknown>>)[key];
+  const value = (definition.extensions as Readonly<Record<PropertyKey, unknown>>)[key];
 
   return typeof value === 'function' ? value : undefined;
 }

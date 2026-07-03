@@ -79,11 +79,8 @@ function formatWithDebug(
 }
 
 test('types function leaves as user-defined path calls', () => {
-  const p = tpath<ApiPaths>().define({
-    __call() {
-      return undefined;
-    },
-  })();
+  const createP = tpath<ApiPaths>().define(() => undefined);
+  const p = createP();
 
   assertType<Promise<User>>(p.users.byId('42'));
   assertType<readonly User[]>(p.users.search('ada', 10));
@@ -97,12 +94,74 @@ test('types function leaves as user-defined path calls', () => {
   p.users.search(1);
 });
 
-test('types nested translation paths', () => {
-  const t = tpath<TranslationCalls>().define({
-    __call() {
-      return 'value';
+test('exports resolve function type for define callbacks', () => {
+  type Resolve = tpath.DefinitionResolve<
+    { readonly messages: Readonly<Record<string, string | undefined>> },
+    {}
+  >;
+  const resolve: Resolve = (ctx, keys) => {
+    expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
+    assertType<readonly string[]>(keys);
+
+    return ctx.messages[keys.join('.')];
+  };
+  const createT = tpath<
+    TranslationCalls,
+    { readonly messages: Readonly<Record<string, string | undefined>> }
+  >().define(resolve);
+  const t = createT({
+    messages: {
+      'common.home.title': 'Home',
     },
-  })();
+  });
+
+  assertType<string | undefined>(t.common.home.title());
+});
+
+test('types resolve-first definitions with second-argument extensions', () => {
+  const createT = tpath<
+    TranslationCalls,
+    { readonly messages: Readonly<Record<string, string | undefined>> }
+  >().define(
+    (ctx, keys, interpolation) => {
+      expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
+      assertType<string>(ctx.$key());
+      assertType<string | undefined>(
+        ctx.resolve<string | undefined>(['common', 'home', 'title'], interpolation),
+      );
+      assertType<readonly string[]>(keys);
+      assertType<unknown>(interpolation);
+
+      return ctx.messages[keys.join('.')];
+    },
+    {
+      $key(ctx, key?: string) {
+        assertType<readonly string[]>(ctx.keys);
+        assertType<Readonly<Record<string, string | undefined>>>(ctx.messages);
+        assertType<string | undefined>(key);
+
+        return appendKey(ctx.keys, key).join('.');
+      },
+      $(ctx, key: string, interpolation?: object) {
+        return ctx.resolve(appendKey(ctx.keys, key), interpolation) as string | undefined;
+      },
+    },
+  );
+  const t = createT({
+    messages: {},
+  });
+
+  assertType<string | undefined>(t.common.home.title());
+  assertType<string>(t.common.home.title.$key());
+  assertType<string | undefined>(t.common.$('home.title'));
+
+  // @ts-expect-error public extension calls do not accept the internal ctx argument
+  t.common.home.$key({ keys: [] });
+});
+
+test('types nested translation paths', () => {
+  const createT = tpath<TranslationCalls>().define(() => 'value');
+  const t = createT();
 
   assertType<string | undefined>(t.common.home.title());
   assertType<string | undefined>(t.common.home.greeting({ name: 'Ada' }));
@@ -117,11 +176,8 @@ test('types nested translation paths', () => {
 });
 
 test('requires interpolation only for messages that declare it', () => {
-  const t = tpath<TranslationCalls>().define({
-    __call() {
-      return 'value';
-    },
-  })();
+  const createT = tpath<TranslationCalls>().define(() => 'value');
+  const t = createT();
 
   t.common.home.title();
 
@@ -139,11 +195,7 @@ test('requires interpolation only for messages that declare it', () => {
 });
 
 test('does not accept context when no context type is declared', () => {
-  const createT = tpath<TranslationCalls>().define({
-    __call() {
-      return 'value';
-    },
-  });
+  const createT = tpath<TranslationCalls>().define(() => 'value');
   const t = createT();
 
   assertType<string | undefined>(t.common.home.title());
@@ -158,14 +210,12 @@ test('accepts context as the second tpath generic', () => {
     {
       readonly messages: Readonly<Record<string, string | undefined>>;
     }
-  >().define({
-    __call(ctx, keys, interpolation) {
-      expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
-      expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
-      assertType<unknown>(interpolation);
+  >().define((ctx, keys, interpolation) => {
+    expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
+    expectTypeOf(keys).toEqualTypeOf<readonly string[]>();
+    assertType<unknown>(interpolation);
 
-      return ctx.messages[keys.join('.')];
-    },
+    return ctx.messages[keys.join('.')];
   });
 
   const t = createT({
@@ -184,44 +234,41 @@ test('accepts context as the second tpath generic', () => {
 });
 
 test('treats an empty factory context as no context argument', () => {
-  type Factory = tpath.Factory<
-    TranslationCalls,
-    {},
-    { readonly __call: (ctx: tpath.DefinitionContext<{}, {}>) => string | undefined }
-  >;
+  type Factory = tpath.Factory<TranslationCalls, {}, {}>;
   type T = tpath.TPath<TranslationCalls, {}>;
 
   expectTypeOf<Factory>().toEqualTypeOf<(ctx?: never) => T>();
 });
 
 test('types ctx-first definition functions', () => {
-  const t = tpath<
+  const createT = tpath<
     TranslationCalls,
     {
       readonly loadingKeys: ReadonlySet<string>;
       readonly messages: Readonly<Record<string, string | undefined>>;
     }
-  >().define({
-    $exists(ctx, key?: string) {
-      expectTypeOf(ctx.keys).toEqualTypeOf<readonly string[]>();
-      expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
-      assertType<string | undefined>(key);
-
-      return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
-    },
-    __call(ctx, keys, interpolation) {
+  >().define(
+    (ctx, keys, interpolation) => {
       assertType<string | undefined>(
-        ctx.__call<string | undefined>(['common', 'home', 'title'], interpolation),
+        ctx.resolve<string | undefined>(['common', 'home', 'title'], interpolation),
       );
-      // @ts-expect-error explicit keys now go through ctx.__call
-      assertType<unknown>(ctx.__callAt);
       ctx.$exists('title');
       assertType<readonly string[]>(keys);
       assertType<unknown>(interpolation);
 
       return ctx.messages[keys.join('.')];
     },
-  })({
+    {
+      $exists(ctx, key?: string) {
+        assertType<readonly string[]>(ctx.keys);
+        assertType<Readonly<Record<string, string | undefined>>>(ctx.messages);
+        assertType<string | undefined>(key);
+
+        return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
+      },
+    },
+  );
+  const t = createT({
     loadingKeys: new Set(),
     messages: {},
   });
@@ -235,43 +282,46 @@ test('types ctx-first definition functions', () => {
 });
 
 test('types extension context and public extension arguments', () => {
-  const t = tpath<
+  const createT = tpath<
     TranslationCalls,
     {
       readonly loadingKeys: ReadonlySet<string>;
       readonly messages: Readonly<Record<string, string | undefined>>;
     }
-  >().define({
-    $key(ctx, key?: string) {
-      return appendKey(ctx.keys, key).join('.');
-    },
-    $exists(ctx, key?: string) {
-      return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
-    },
-    __call(ctx, keys) {
+  >().define(
+    (ctx, keys) => {
       assertType<string>(ctx.$key());
       assertType<readonly string[]>(keys);
 
       return ctx.messages[keys.join('.')];
     },
-    $(ctx, key: string, interpolation?: object) {
-      expectTypeOf(ctx.keys).toEqualTypeOf<readonly string[]>();
-      assertType<string | undefined>(
-        ctx.__call<string | undefined>(['common', 'home', 'title'], interpolation),
-      );
+    {
+      $key(ctx, key?: string) {
+        return appendKey(ctx.keys, key).join('.');
+      },
+      $exists(ctx, key?: string) {
+        return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
+      },
+      $(ctx, key: string, interpolation?: object) {
+        assertType<readonly string[]>(ctx.keys);
+        assertType<string | undefined>(
+          ctx.resolve(['common', 'home', 'title'], interpolation) as string | undefined,
+        );
 
-      return ctx.__call<string | undefined>(appendKey(ctx.keys, key), interpolation);
-    },
-    $loading(ctx, key: string, priority?: number) {
-      assertType<readonly string[]>(ctx.keys);
-      assertType<string>(ctx.$key(key));
-      expectTypeOf(ctx.loadingKeys).toEqualTypeOf<ReadonlySet<string>>();
-      assertType<string>(key);
-      assertType<number | undefined>(priority);
+        return ctx.resolve(appendKey(ctx.keys, key), interpolation) as string | undefined;
+      },
+      $loading(ctx, key: string, priority?: number) {
+        assertType<readonly string[]>(ctx.keys);
+        assertType<string>(ctx.$key(key));
+        assertType<ReadonlySet<string>>(ctx.loadingKeys);
+        assertType<string>(key);
+        assertType<number | undefined>(priority);
 
-      return true;
+        return true;
+      },
     },
-  })({
+  );
+  const t = createT({
     loadingKeys: new Set(),
     messages: {},
   });
@@ -298,22 +348,31 @@ test('types extension context and public extension arguments', () => {
 
 test('types symbol-keyed extensions alongside $-prefixed translation keys', () => {
   const exists = Symbol('exists');
-  const t = tpath<
+  const createT = tpath<
     TranslationCallsWithDollarKeys,
     { readonly messages: Readonly<Record<string, string | undefined>> }
-  >().define({
-    [exists](ctx, key?: string) {
-      expectTypeOf(ctx.keys).toEqualTypeOf<readonly string[]>();
-      assertType<string | undefined>(key);
-
-      return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
-    },
-    __call(ctx, keys) {
+  >().define(
+    (ctx, keys) => {
       assertType<boolean>(ctx[exists]('$exists'));
 
       return ctx.messages[keys.join('.')];
     },
-  })({
+    {
+      [exists](
+        ctx: tpath.DefinitionContext<
+          { readonly messages: Readonly<Record<string, string | undefined>> },
+          any
+        >,
+        key?: string,
+      ) {
+        assertType<readonly string[]>(ctx.keys);
+        assertType<string | undefined>(key);
+
+        return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
+      },
+    },
+  );
+  const t = createT({
     messages: {},
   });
 
@@ -322,16 +381,15 @@ test('types symbol-keyed extensions alongside $-prefixed translation keys', () =
 });
 
 test('types __call as a path key when the translation tree declares it', () => {
-  const t = tpath<
+  const createT = tpath<
     TranslationCallsWithDefinitionKey,
     { readonly messages: Readonly<Record<string, string | undefined>> }
-  >().define({
-    __call(ctx, keys) {
-      assertType<string | undefined>(ctx.__call(['common', 'home', '__call']));
+  >().define((ctx, keys) => {
+    assertType<string | undefined>(ctx.resolve(['common', 'home', '__call']));
 
-      return ctx.messages[keys.join('.')];
-    },
-  })({
+    return ctx.messages[keys.join('.')];
+  });
+  const t = createT({
     messages: {},
   });
 
@@ -342,23 +400,27 @@ test('types __call as a path key when the translation tree declares it', () => {
   t.common.home.title.__call();
 });
 
-test('does not expose a built-in format helper to definitions', () => {
+test('does not expose a built-in format helper to the resolve function', () => {
   tpath<
     TranslationCalls,
     { readonly messages: Readonly<Record<string, string | undefined>> }
-  >().define({
-    $(ctx): string | undefined {
-      // @ts-expect-error definitions should call ctx.__call, not format
-      return ctx.format(['common', 'home', 'title']);
-    },
-    __call(ctx) {
+  >().define(
+    (ctx) => {
+      // @ts-expect-error definitions should call ctx.resolve, not format
+      ctx.format(['common', 'home', 'title']);
+
       return ctx.messages[ctx.keys.join('.')];
     },
-  });
+    {
+      $(ctx): string | undefined {
+        return ctx.resolve(['common', 'home', 'title']) as string | undefined;
+      },
+    },
+  );
 });
 
 test('types shared context in formatter and extension context', () => {
-  const t = tpath<
+  const createT = tpath<
     TranslationCalls,
     {
       readonly debug: boolean;
@@ -366,28 +428,31 @@ test('types shared context in formatter and extension context', () => {
       readonly messages: Readonly<Record<string, string | undefined>>;
       readonly strict: boolean;
     }
-  >().define({
-    $locale(ctx) {
-      assertType<boolean>(ctx.debug);
-      assertType<string>(ctx.locale);
-      assertType<boolean>(ctx.strict);
-
-      return ctx.locale;
-    },
-    $strict(ctx, expected: boolean) {
-      assertType<boolean>(ctx.strict);
-      assertType<boolean>(expected);
-
-      return ctx.strict === expected;
-    },
-    __call(ctx) {
+  >().define(
+    (ctx) => {
       assertType<boolean>(ctx.debug);
       assertType<string>(ctx.locale);
       assertType<boolean>(ctx.strict);
 
       return formatWithDebug(ctx.keys, ctx);
     },
-  })({
+    {
+      $locale(ctx) {
+        assertType<boolean>(ctx.debug);
+        assertType<string>(ctx.locale);
+        assertType<boolean>(ctx.strict);
+
+        return ctx.locale;
+      },
+      $strict(ctx, expected: boolean) {
+        assertType<boolean>(ctx.strict);
+        assertType<boolean>(expected);
+
+        return ctx.strict === expected;
+      },
+    },
+  );
+  const t = createT({
     debug: true,
     locale: 'en',
     messages: {},
@@ -408,19 +473,21 @@ test('preserves all fields in the declared context type', () => {
       readonly locale: string;
       readonly messages: Readonly<Record<string, string | undefined>>;
     }
-  >().define({
-    $locale(ctx) {
-      assertType<string>(ctx.locale);
-
-      return ctx.locale;
-    },
-    __call(ctx) {
+  >().define(
+    (ctx) => {
       assertType<string>(ctx.locale);
       expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
 
       return ctx.messages[ctx.keys.join('.')];
     },
-  });
+    {
+      $locale(ctx) {
+        assertType<string>(ctx.locale);
+
+        return ctx.locale;
+      },
+    },
+  );
 
   const t = createT({
     locale: 'en',

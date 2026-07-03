@@ -1,7 +1,7 @@
 # TPath
 
 TPath is a tiny TypeScript helper for building typed proxy paths. It collects property names into a
-string path, then delegates the runtime behavior to your own `__call` definition.
+string path, then delegates the runtime behavior to your own resolve function.
 
 It is intentionally small enough to copy into a project. There is no npm package to install and no
 published package workflow in this repository. Copy [`tpath.ts`](./tpath.ts) into your source tree,
@@ -20,7 +20,7 @@ import { tpath } from './tpath';
 ## Basic Translation Usage
 
 Start with your source locale as a literal object, then map that shape into callable translation
-paths. TPath keeps the nested keys typed, while your `__call` definition decides how those keys map
+paths. TPath keeps the nested keys typed, while your resolve function decides how those keys map
 to dictionaries, formatting, debug output, or missing-key behavior.
 
 ```ts
@@ -83,16 +83,14 @@ const createT = tpath<
   {
     readonly messages: Readonly<Record<string, string | undefined>>;
   }
->().define({
-  __call(ctx, keys, interpolation) {
-    const message = ctx.messages[keys.join('.')];
+>().define((ctx, keys, interpolation) => {
+  const message = ctx.messages[keys.join('.')];
 
-    if (message === undefined) {
-      return undefined;
-    }
+  if (message === undefined) {
+    return undefined;
+  }
 
-    return formatMessage(message, interpolation);
-  },
+  return formatMessage(message, interpolation);
 });
 
 const t = createT({ messages });
@@ -109,7 +107,7 @@ between your message literals and callable leaves. The simple examples keep a co
 
 ## Caller-Owned Lookup
 
-The `__call` definition receives a `ctx` first argument with the context fields passed to the
+The resolve function receives a `ctx` first argument with the context fields passed to the
 factory, then an explicit `keys` array for the collected path. TPath does not decide which part of
 the path is a namespace, how dictionaries are stored, or what should happen when a message is
 missing.
@@ -125,16 +123,14 @@ const dictionaries = {
 const createT = tpath<
   TranslationPath<Translations>,
   { readonly dictionaries: typeof dictionaries }
->().define({
-  __call(ctx, keys) {
-    const [namespace, ...messagePath] = keys;
+>().define((ctx, keys) => {
+  const [namespace, ...messagePath] = keys;
 
-    if (namespace === undefined) {
-      return undefined;
-    }
+  if (namespace === undefined) {
+    return undefined;
+  }
 
-    return ctx.dictionaries[namespace]?.[messagePath.join('.')];
-  },
+  return ctx.dictionaries[namespace]?.[messagePath.join('.')];
 });
 
 const t = createT({ dictionaries });
@@ -148,8 +144,8 @@ fallback string.
 
 ## Fallback And Debug Policy
 
-TPath returns the `__call` result as-is. If `__call` returns `undefined`, the translated call returns
-`undefined`; if `__call` throws, the error propagates. If you want joined-key fallback or debug-key
+TPath returns the resolve function result as-is. If it returns `undefined`, the translated call returns
+`undefined`; if it throws, the error propagates. If you want joined-key fallback or debug-key
 rendering, make that part of your definition.
 
 ```ts
@@ -159,14 +155,12 @@ const createT = tpath<
     readonly debug: boolean;
     readonly messages: Readonly<Record<string, string | undefined>>;
   }
->().define({
-  __call(ctx, keys) {
-    if (ctx.debug) {
-      return keys.join('.');
-    }
+>().define((ctx, keys) => {
+  if (ctx.debug) {
+    return keys.join('.');
+  }
 
-    return ctx.messages[keys.join('.')];
-  },
+  return ctx.messages[keys.join('.')];
 });
 
 const t = createT({ debug: true, messages });
@@ -176,8 +170,8 @@ t.common.home.title(); // "common.home.title"
 
 ## Translation Helpers
 
-Definitions can include ordinary `$...` functions. TPath exposes them on every path node and passes
-the current path plus the factory context as the first `ctx` argument.
+The second `define` argument can include ordinary `$...` functions. TPath exposes them on every path
+node and passes the current path plus the factory context as the first `ctx` argument.
 
 ```ts
 const loadingKeys = new Set(['common.home.title']);
@@ -188,20 +182,22 @@ const createT = tpath<
     readonly loadingKeys: ReadonlySet<string>;
     readonly messages: Readonly<Record<string, string | undefined>>;
   }
->().define({
-  $key(ctx, key?: string) {
-    return (key === undefined ? ctx.keys : [...ctx.keys, key]).join('.');
-  },
-  $exists(ctx, key?: string) {
-    return ctx.messages[ctx.$key(key)] !== undefined;
-  },
-  $loading(ctx, key?: string) {
-    return ctx.loadingKeys.has(ctx.$key(key));
-  },
-  __call(ctx, keys) {
+>().define(
+  (ctx, keys) => {
     return ctx.messages[keys.join('.')];
   },
-});
+  {
+    $key(ctx, key?: string) {
+      return (key === undefined ? ctx.keys : [...ctx.keys, key]).join('.');
+    },
+    $exists(ctx, key?: string) {
+      return ctx.messages[ctx.$key(key)] !== undefined;
+    },
+    $loading(ctx, key?: string) {
+      return ctx.loadingKeys.has(ctx.$key(key));
+    },
+  },
+);
 
 const t = createT({ loadingKeys, messages });
 
@@ -225,16 +221,18 @@ const createT = tpath<
     };
   },
   { readonly messages: Readonly<Record<string, string | undefined>> }
->().define({
-  [exists](ctx, key?: string) {
-    const keys = key === undefined ? ctx.keys : [...ctx.keys, key];
-
-    return ctx.messages[keys.join('.')] !== undefined;
-  },
-  __call(ctx, keys) {
+>().define(
+  (ctx, keys) => {
     return ctx.messages[keys.join('.')];
   },
-});
+  {
+    [exists](ctx, key?: string) {
+      const keys = key === undefined ? ctx.keys : [...ctx.keys, key];
+
+      return ctx.messages[keys.join('.')] !== undefined;
+    },
+  },
+);
 
 const t = createT({ messages });
 
@@ -243,24 +241,26 @@ t.common.home[exists]('$exists'); // true
 ```
 
 If you need a dynamic-key escape hatch, provide it as another `$...` method. Use the bound
-`ctx.__call<TReturn>(keys, ...args)` helper to call `__call` for an explicit path without mutating
+`ctx.resolve(keys, ...args)` helper to run the resolve function for an explicit path without mutating
 the current path.
 
 ```ts
 const createT = tpath<
   TranslationPath<Translations>,
   { readonly messages: Readonly<Record<string, string | undefined>> }
->().define({
-  $(ctx, key: string, interpolation?: object) {
-    return ctx.__call<string | undefined>([...ctx.keys, key], interpolation);
-  },
-  __call(ctx, keys, interpolation) {
+>().define(
+  (ctx, keys, interpolation) => {
     const message = ctx.messages[keys.join('.')];
     const values = interpolation as { readonly name: string } | undefined;
 
     return values === undefined ? message : message?.replace('{name}', values.name);
   },
-});
+  {
+    $(ctx, key: string, interpolation?: object) {
+      return ctx.resolve([...ctx.keys, key], interpolation) as string | undefined;
+    },
+  },
+);
 
 const t = createT({ messages });
 
@@ -273,7 +273,7 @@ not provided, it is not part of the typed proxy.
 ## Examples
 
 The `examples/react-simple` app shows the definer API in a small React app with typed translation
-paths, context-bound messages, interpolation, debug-key rendering, and an opt-in `$...` method.
+paths, context-bound messages, interpolation, and debug-key rendering.
 
 ```sh
 pnpm --dir examples/react-simple install
@@ -283,8 +283,7 @@ pnpm --dir examples/react-simple build
 ```
 
 The `examples/solid-simple` app mirrors `react-simple` in a small Solid app scaffolded with Vite.
-It uses the same nested dictionaries, translator context, interpolation, debug-key rendering, and
-opt-in `$...` method.
+It uses the same nested dictionaries, translator context, interpolation, and debug-key rendering.
 
 ```sh
 pnpm --dir examples/solid-simple install
@@ -294,8 +293,7 @@ pnpm --dir examples/solid-simple build
 ```
 
 The `examples/vue-simple` app mirrors `react-simple` in a small Vue app scaffolded with Vite.
-It uses the same nested dictionaries, translator context, interpolation, debug-key rendering, and
-opt-in `$...` method.
+It uses the same nested dictionaries, translator context, interpolation, and debug-key rendering.
 
 ```sh
 pnpm --dir examples/vue-simple install
@@ -342,18 +340,16 @@ interface ApiPaths {
 const p = tpath<
   ApiPaths,
   { readonly request: (keys: readonly string[], args: readonly unknown[]) => unknown }
->().define({
-  __call(ctx, keys, ...args) {
-    return ctx.request(keys, args);
-  },
+>().define((ctx, keys, ...args) => {
+  return ctx.request(keys, args);
 })({ request });
 
 p.users.byId('42'); // Promise<User>
 p.users.search('ada', 10); // Promise<readonly User[]>
 ```
 
-The same rule still applies: TPath gives you typed paths, and your `__call` definition owns the
-runtime boundary.
+The same rule still applies: TPath gives you typed paths, and your resolve function owns the runtime
+boundary.
 
 ## Development
 

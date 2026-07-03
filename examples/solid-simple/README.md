@@ -4,7 +4,7 @@ This example is the smallest useful Solid shape for TPath.
 
 It creates one translator factory with the local `TranslationPath<typeof en>` type, binds nested
 messages through `ctx`, and lets `App` switch between `en` and `ru` at runtime. The app shows typed
-paths, a small local formatter, debug-key rendering, and one small `$exists` method.
+paths, a small local formatter, and debug-key rendering.
 
 ## What It Shows
 
@@ -14,8 +14,7 @@ paths, a small local formatter, debug-key rendering, and one small `$exists` met
 - The language selector swaps the nested dictionary passed into `createT`.
 - `ctx.messages()` owns nested lookup data instead of a closure around a module variable.
 - `ctx.debug()` makes the same factory render joined keys.
-- The `__call` definition owns missing-message behavior; TPath does not add a fallback.
-- The `$exists` method is opt-in and receives the same bound context as `__call`.
+- The resolve function owns missing-message behavior; TPath does not add a fallback.
 - Solid owns form state; TPath owns path collection and formatting.
 
 ## Run It

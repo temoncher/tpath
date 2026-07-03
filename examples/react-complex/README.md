@@ -23,7 +23,7 @@ flight.
 - Generated English messages imported in tests as stable mock values.
 - Async translation loading owned by React, with the shell and every route fetching only its own
   namespace file.
-- Missing translations, loading, and errors are represented by caller-owned `__call` and `$...`
+- Missing translations, loading, and errors are represented by the caller-owned resolve function and `$...`
   methods instead of built-in TPath fallback behavior.
 - `$loading`, an opt-in method used to render text shimmers while translations load.
 - `$key`, an opt-in method used to derive stable metadata keys from translation paths.
@@ -72,7 +72,7 @@ pnpm build
 
 - `tools/generate-translations.ts` contains the flat-JSON to nested-TS generator.
 - `src/shared/TranslationPath.ts` contains the full translation path type adapter.
-- `src/shared/createT.ts` contains the TPath factory, `__call`, `$`, `$key`, `$error`, and
+- `src/shared/createT.ts` contains the TPath factory, resolve function, `$`, `$key`, `$error`, and
   `$loading`.
 - `src/shared/useT.ts` contains async locale query composition.
 - `src/app/shellDeps.ts` contains static translation JSON loading for the app shell.

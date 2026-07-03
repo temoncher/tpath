@@ -14,13 +14,8 @@ interface TranslationContext {
   readonly messages: Accessor<Messages<Translations>>;
 }
 
-export const createT = tpath<TranslationPath<Translations>, TranslationContext>().define({
-  $exists(ctx, key?: string) {
-    const nextKeys = key === undefined ? ctx.keys : [...ctx.keys, key];
-
-    return resolveNested(ctx.messages(), nextKeys) !== undefined;
-  },
-  __call(ctx, keys, interpolation) {
+export const createT = tpath<TranslationPath<Translations>, TranslationContext>().define(
+  (ctx, keys, interpolation) => {
     if (ctx.debug()) {
       return keys.join(".");
     }
@@ -33,7 +28,7 @@ export const createT = tpath<TranslationPath<Translations>, TranslationContext>(
 
     return formatMessage(message, interpolation);
   },
-});
+);
 
 const translations = {
   en,
@@ -99,7 +94,7 @@ export function App(props: AppProps = {}) {
         <label for="note">{t.app.form.label()}</label>
         <input
           id="note"
-          placeholder={t.app.form.placeholder.$exists() ? t.app.form.placeholder() : undefined}
+          placeholder={t.app.form.placeholder()}
           value={text()}
           onInput={(event) => setText(event.currentTarget.value)}
         />

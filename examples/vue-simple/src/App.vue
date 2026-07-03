@@ -13,13 +13,8 @@ interface TranslationContext {
   readonly messages: Accessor<Messages<Translations>>;
 }
 
-export const createT = tpath<TranslationPath<Translations>, TranslationContext>().define({
-  $exists(ctx, key?: string) {
-    const nextKeys = key === undefined ? ctx.keys : [...ctx.keys, key];
-
-    return resolveNested(ctx.messages(), nextKeys) !== undefined;
-  },
-  __call(ctx, keys, interpolation) {
+export const createT = tpath<TranslationPath<Translations>, TranslationContext>().define(
+  (ctx, keys, interpolation) => {
     if (ctx.debug()) {
       return keys.join(".");
     }
@@ -32,7 +27,7 @@ export const createT = tpath<TranslationPath<Translations>, TranslationContext>(
 
     return formatMessage(message, interpolation);
   },
-});
+);
 
 const translations = {
   en,
@@ -121,11 +116,7 @@ function submit() {
 
     <form @submit.prevent="submit">
       <label for="note">{{ t.app.form.label() }}</label>
-      <input
-        id="note"
-        v-model="text"
-        :placeholder="t.app.form.placeholder.$exists() ? t.app.form.placeholder() : undefined"
-      />
+      <input id="note" v-model="text" :placeholder="t.app.form.placeholder()" />
       <button type="submit">{{ t.app.form.submit() }}</button>
     </form>
 

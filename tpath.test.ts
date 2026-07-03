@@ -97,18 +97,45 @@ describe('tpath', () => {
     vi.restoreAllMocks();
   });
 
-  test('forwards all leaf call arguments to the caller-owned definition', () => {
-    const p = tpath<ApiPaths>().define({
-      $key(ctx, key: string) {
-        return [...ctx.keys, key].join('.');
+  test('defines the mandatory path resolve before optional extensions', () => {
+    const messages = {
+      'common.home.greeting': 'Hello, {name}!',
+    };
+    const createT = tpath<
+      TranslationCalls,
+      { readonly messages: Readonly<Record<string, string | undefined>> }
+    >().define(
+      (ctx, keys, interpolation) => {
+        const message = ctx.messages[keys.join('.')];
+        const values = interpolation as { readonly name: string };
+
+        return message?.replace('{name}', values.name);
       },
-      __call(_ctx, keys, ...args) {
-        return {
-          args,
-          keys,
-        };
+      {
+        $(ctx, key: string, interpolation?: object) {
+          return ctx.resolve([...ctx.keys, key], interpolation) as string | undefined;
+        },
       },
-    })();
+    );
+    const t = createT({ messages });
+
+    expect(t.common.home.greeting({ name: 'Ada' })).toBe('Hello, Ada!');
+    expect(t.common.$('home.greeting', { name: 'Ada' })).toBe('Hello, Ada!');
+  });
+
+  test('forwards all leaf arguments to the caller-owned definition', () => {
+    const createP = tpath<ApiPaths>().define(
+      (_ctx, keys, ...args) => ({
+        args,
+        keys,
+      }),
+      {
+        $key(ctx, key: string) {
+          return [...ctx.keys, key].join('.');
+        },
+      },
+    );
+    const p = createP();
 
     expect(p.users.search('ada', 2)).toEqual({
       args: ['ada', 2],
@@ -126,12 +153,10 @@ describe('tpath', () => {
     const createT = tpath<
       TranslationCalls,
       { readonly messages: Readonly<Record<string, string | undefined>> }
-    >().define({
-      __call(ctx) {
-        requestedKeys.push([...ctx.keys]);
+    >().define((ctx) => {
+      requestedKeys.push([...ctx.keys]);
 
-        return ctx.messages[ctx.keys.join('.')];
-      },
+      return ctx.messages[ctx.keys.join('.')];
     });
     const t = createT({ messages });
 
@@ -139,7 +164,7 @@ describe('tpath', () => {
     expect(requestedKeys).toEqual([['common', 'home', 'title']]);
   });
 
-  test('passes collected keys as an explicit __call argument', () => {
+  test('passes collected keys as an explicit resolve argument', () => {
     const requestedKeys: string[][] = [];
     const messages = {
       'common.home.title': 'Home',
@@ -148,12 +173,10 @@ describe('tpath', () => {
     const createT = tpath<
       TranslationCalls,
       { readonly messages: Readonly<Record<string, string | undefined>> }
-    >().define({
-      __call(ctx, keys) {
-        requestedKeys.push([...keys]);
+    >().define((ctx, keys) => {
+      requestedKeys.push([...keys]);
 
-        return ctx.messages[keys.join('.')];
-      },
+      return ctx.messages[keys.join('.')];
     });
     const t = createT({ messages });
 
@@ -165,11 +188,7 @@ describe('tpath', () => {
     const createT = tpath<
       TranslationCalls,
       { readonly messages: Readonly<Record<string, string | undefined>> }
-    >().define({
-      __call(ctx) {
-        return ctx.messages[ctx.keys.join('.')];
-      },
-    });
+    >().define((ctx) => ctx.messages[ctx.keys.join('.')]);
 
     const en = createT({ messages: { 'common.home.title': 'Home' } });
     const alternate = createT({ messages: { 'common.home.title': 'Start' } });
@@ -204,17 +223,14 @@ describe('tpath', () => {
         return formatMessages[message as keyof typeof formatMessages](interpolation);
       },
     };
-    const t = tpath<
+    const createT = tpath<
       TranslationCalls,
       {
         readonly formatter: typeof formatter;
         readonly messages: Readonly<Record<string, string | undefined>>;
       }
-    >().define({
-      __call(ctx, keys, interpolation) {
-        return lookupAndFormat(keys, ctx, interpolation);
-      },
-    })({
+    >().define((ctx, keys, interpolation) => lookupAndFormat(keys, ctx, interpolation));
+    const t = createT({
       formatter,
       messages,
     });
@@ -224,41 +240,45 @@ describe('tpath', () => {
     expect(t.admin.users.count({ count: 2 })).toBe('2 users');
   });
 
-  test('lets extensions call __call with caller-owned keys', () => {
+  test('lets extensions resolve caller-owned keys', () => {
     const messages = {
       'common.home.greeting': 'Hello, {name}!',
     };
-    const t = tpath<
+    const createT = tpath<
       TranslationCalls,
       { readonly messages: Readonly<Record<string, string | undefined>> }
-    >().define({
-      __call(ctx, keys, interpolation) {
+    >().define(
+      (ctx, keys, interpolation) => {
         const message = ctx.messages[keys.join('.')];
         const values = interpolation as { readonly name: string };
 
         return message?.replace('{name}', values.name);
       },
-      $(ctx, key: string, interpolation?: object) {
-        return ctx.__call<string | undefined>([...ctx.keys, key], interpolation);
+      {
+        $(ctx, key: string, interpolation?: object) {
+          return ctx.resolve([...ctx.keys, key], interpolation) as string | undefined;
+        },
       },
-    })({ messages });
+    );
+    const t = createT({ messages });
 
     expect(t.common.$('home.greeting', { name: 'Ada' })).toBe('Hello, Ada!');
   });
 
   test('lets extensions reuse other extension helpers', () => {
     const loadingKeys = new Set(['common.home.title']);
-    const t = tpath<TranslationCalls, { readonly loadingKeys: ReadonlySet<string> }>().define({
-      $key(ctx, key?: string) {
-        return appendKey(ctx.keys, key).join('.');
+    const createT = tpath<TranslationCalls, { readonly loadingKeys: ReadonlySet<string> }>().define(
+      (ctx) => ctx.$key(),
+      {
+        $key(ctx, key?: string) {
+          return appendKey(ctx.keys, key).join('.');
+        },
+        $loading(ctx, key?: string) {
+          return ctx.loadingKeys.has(ctx.$key(key));
+        },
       },
-      __call(ctx) {
-        return ctx.$key();
-      },
-      $loading(ctx, key?: string) {
-        return ctx.loadingKeys.has(ctx.$key(key));
-      },
-    })({ loadingKeys });
+    );
+    const t = createT({ loadingKeys });
 
     expect(t.common.home.title.$key()).toBe('common.home.title');
     expect(t.common.home.title()).toBe('common.home.title');
@@ -273,23 +293,21 @@ describe('tpath', () => {
       'common.home.title': 'Home',
     };
     const loadingKeys = new Set(['common.home.title']);
-    const t = tpath<
+    const createT = tpath<
       TranslationCalls,
       {
         readonly loadingKeys: ReadonlySet<string>;
         readonly messages: Readonly<Record<string, string | undefined>>;
       }
-    >().define({
+    >().define((ctx) => ctx.messages[ctx.keys.join('.')], {
       $exists(ctx, key?: string) {
         return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
       },
       $loading(ctx, key?: string) {
         return ctx.loadingKeys.has(appendKey(ctx.keys, key).join('.'));
       },
-      __call(ctx) {
-        return ctx.messages[ctx.keys.join('.')];
-      },
-    })({
+    });
+    const t = createT({
       loadingKeys,
       messages,
     });
@@ -306,17 +324,21 @@ describe('tpath', () => {
       'common.home.$exists': 'literal exists key',
       'common.home.title': 'Home',
     };
-    const t = tpath<
+    const createT = tpath<
       TranslationCallsWithDollarKeys,
       { readonly messages: Readonly<Record<string, string | undefined>> }
-    >().define({
-      [exists](ctx, key?: string) {
+    >().define((ctx, keys) => ctx.messages[keys.join('.')], {
+      [exists](
+        ctx: tpath.DefinitionContext<
+          { readonly messages: Readonly<Record<string, string | undefined>> },
+          any
+        >,
+        key?: string,
+      ) {
         return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
       },
-      __call(ctx, keys) {
-        return ctx.messages[keys.join('.')];
-      },
-    })({ messages });
+    });
+    const t = createT({ messages });
 
     expect(t.common.home.$exists()).toBe('literal exists key');
     expect(t.common.home[exists]('$exists')).toBe(true);
@@ -328,37 +350,32 @@ describe('tpath', () => {
       'common.home.__call': 'literal definition key',
       'common.home.title': 'Home',
     };
-    const t = tpath<
+    const createT = tpath<
       TranslationCallsWithDefinitionKey,
       { readonly messages: Readonly<Record<string, string | undefined>> }
-    >().define({
-      __call(ctx, keys) {
-        return ctx.messages[keys.join('.')];
-      },
-    })({ messages });
+    >().define((ctx, keys) => ctx.messages[keys.join('.')]);
+    const t = createT({ messages });
 
     expect(t.common.home.__call()).toBe('literal definition key');
     expect(t.common.home.title()).toBe('Home');
   });
 
   test('passes bound context into extension context', () => {
-    const t = tpath<
+    const createT = tpath<
       TranslationCalls,
       {
         readonly debug: boolean;
         readonly locale: string;
       }
-    >().define({
+    >().define(() => 'Home', {
       $locale(ctx) {
         return ctx.locale;
       },
       $debug(ctx) {
         return ctx.debug;
       },
-      __call() {
-        return 'Home';
-      },
-    })({
+    });
+    const t = createT({
       debug: true,
       locale: 'en',
     });
@@ -368,11 +385,8 @@ describe('tpath', () => {
   });
 
   test('returns undefined when the caller-owned formatter returns no translation', () => {
-    const t = tpath<TranslationCalls>().define({
-      __call() {
-        return undefined;
-      },
-    })();
+    const createT = tpath<TranslationCalls>().define(() => undefined);
+    const t = createT();
 
     expect(t.common.home.title()).toBeUndefined();
   });
@@ -387,41 +401,36 @@ describe('tpath', () => {
         readonly keys: readonly string[];
       }) => string | undefined
     >(({ ctx, keys }) => formatWithDebug(keys, ctx));
-    const t = tpath<
+    const createT = tpath<
       TranslationCalls,
       {
         readonly debug: boolean;
         readonly messages: Readonly<Record<string, string | undefined>>;
       }
-    >().define({
-      __call(ctx) {
-        return formatter({
-          ctx,
-          keys: ctx.keys,
-        });
-      },
-    })({ debug: true, messages: {} });
+    >().define((ctx) =>
+      formatter({
+        ctx,
+        keys: ctx.keys,
+      }),
+    );
+    const t = createT({ debug: true, messages: {} });
 
     expect(t.common.home.title()).toBe('common.home.title');
     expect(formatter).toHaveBeenCalledTimes(1);
   });
 
   test('lets formatter errors propagate to the caller', () => {
-    const t = tpath<TranslationCalls>().define({
-      __call() {
-        throw new Error('formatter failed');
-      },
-    })();
+    const createT = tpath<TranslationCalls>().define(() => {
+      throw new Error('formatter failed');
+    });
+    const t = createT();
 
     expect(() => t.common.home.greeting({ name: 'Ada' })).toThrow('formatter failed');
   });
 
   test('rejects symbol path keys', () => {
-    const t = tpath<TranslationCalls>().define({
-      __call() {
-        return undefined;
-      },
-    })();
+    const createT = tpath<TranslationCalls>().define(() => undefined);
+    const t = createT();
 
     expect(() => {
       Reflect.get(t, Symbol('bad'));
