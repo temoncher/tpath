@@ -189,10 +189,10 @@ the complex React example keeps a fuller parser in
 
 ## Caller-Owned Lookup
 
-The resolve function receives a `ctx` first argument with the context fields passed to the
-factory, then an explicit `keys` array for the collected path. tpath does not decide which part of
-the path is a namespace, how dictionaries are stored, or what should happen when a message is
-missing.
+The resolve function receives a `ctx` first argument. That context contains the fields passed to the
+factory plus `keys` for the current path and `resolve` for explicit-key calls. tpath does not decide
+which part of the path is a namespace, how dictionaries are stored, or what should happen when a
+message is missing.
 
 ```ts
 const dictionaries = {
@@ -202,18 +202,17 @@ const dictionaries = {
   },
 };
 
-const createT = tpath<
-  Translations,
-  { readonly dictionaries: typeof dictionaries }
->().define((ctx, keys) => {
-  const [namespace, ...messagePath] = keys;
+const createT = tpath<Translations, { readonly dictionaries: typeof dictionaries }>().define(
+  (ctx, keys) => {
+    const [namespace, ...messagePath] = keys;
 
-  if (namespace === undefined) {
-    return undefined;
-  }
+    if (namespace === undefined) {
+      return undefined;
+    }
 
-  return ctx.dictionaries[namespace]?.[messagePath.join('.')];
-});
+    return ctx.dictionaries[namespace]?.[messagePath.join('.')];
+  },
+);
 
 const t = createT({ dictionaries });
 
@@ -252,8 +251,9 @@ t.common.home.title(); // "common.home.title"
 
 ## Translation Extensions
 
-The second `define` argument can include ordinary extension functions. tpath exposes them on every
-path node and passes the current path plus the factory context as the first `ctx` argument. The
+Use `extend` to register ordinary extension methods before calling `define`. tpath exposes
+extensions on every path node and passes the current path plus the factory context as the first
+`ctx` argument. Later `extend` calls can use extensions declared by earlier `extend` calls. The
 examples use `$...` names by convention, but extension names are ordinary object keys.
 
 ```ts
@@ -265,14 +265,13 @@ const createT = tpath<
     readonly loadingKeys: ReadonlySet<string>;
     readonly messages: Readonly<Record<string, string | undefined>>;
   }
->().define(
-  (ctx, keys) => {
-    return ctx.messages[keys.join('.')];
-  },
-  {
+>()
+  .extend({
     $key(ctx, key?: string) {
       return (key === undefined ? ctx.keys : [...ctx.keys, key]).join('.');
     },
+  })
+  .extend({
     $exists(ctx, key?: string) {
       return ctx.messages[ctx.$key(key)] !== undefined;
     },
@@ -282,8 +281,10 @@ const createT = tpath<
     _key(ctx, key?: string) {
       return ctx.$key(key);
     },
-  },
-);
+  })
+  .define((ctx, keys) => {
+    return ctx.messages[keys.join('.')];
+  });
 
 const t = createT({ loadingKeys, messages });
 
@@ -308,18 +309,17 @@ const createT = tpath<
     };
   },
   { readonly messages: Readonly<Record<string, string | undefined>> }
->().define(
-  (ctx, keys) => {
-    return ctx.messages[keys.join('.')];
-  },
-  {
+>()
+  .extend({
     [exists](ctx, key?: string) {
       const keys = key === undefined ? ctx.keys : [...ctx.keys, key];
 
       return ctx.messages[keys.join('.')] !== undefined;
     },
-  },
-);
+  })
+  .define((ctx, keys) => {
+    return ctx.messages[keys.join('.')];
+  });
 
 const t = createT({ messages });
 
@@ -327,27 +327,26 @@ t.common.home.$exists(); // looks up "common.home.$exists"
 t.common.home[exists]('$exists'); // true
 ```
 
-If you need a dynamic-key escape hatch, provide it as another extension. Use the bound
-`ctx.resolve(keys, ...args)` helper to run the resolve function for an explicit path without mutating
-the current path.
+If you need a dynamic-key escape hatch, provide it as another extension. Use the
+`ctx.resolve(keys, ...args)` helper to run the resolve function for an explicit path without
+mutating the current path.
 
 ```ts
 const createT = tpath<
   Translations,
   { readonly messages: Readonly<Record<string, string | undefined>> }
->().define(
-  (ctx, keys, interpolation) => {
+>()
+  .extend({
+    $(ctx, key: string, interpolation?: object) {
+      return ctx.resolve([...ctx.keys, key], interpolation) as string | undefined;
+    },
+  })
+  .define((ctx, keys, interpolation) => {
     const message = ctx.messages[keys.join('.')];
     const values = interpolation as { readonly name: string } | undefined;
 
     return values === undefined ? message : message?.replace('{name}', values.name);
-  },
-  {
-    $(ctx, key: string, interpolation?: object) {
-      return ctx.resolve([...ctx.keys, key], interpolation) as string | undefined;
-    },
-  },
-);
+  });
 
 const t = createT({ messages });
 

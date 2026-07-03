@@ -25,7 +25,7 @@ export const createT = tpath<TranslationPath<Translations>, TranslationContext>(
       return undefined;
     }
 
-    return formatMessage(message, interpolation);
+    return formatMessage(message, interpolation as Parameters<typeof formatMessage>[1]);
   },
 );
 

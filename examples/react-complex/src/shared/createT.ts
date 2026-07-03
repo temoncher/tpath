@@ -29,25 +29,16 @@ interface TranslationContext {
   readonly messages: TranslationMessages;
 }
 
-export const createT = tpath<TranslationPath<Translations>, TranslationContext>().define(
-  (ctx, keys, interpolation) => {
-    const message = ctx.messages[keys.join(".")];
-
-    if (message === undefined) {
-      return undefined;
-    }
-
-    return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
-      interpolation as any,
-    ) as string;
-  },
-  {
+export const createT = tpath<TranslationPath<Translations>, TranslationContext>()
+  .extend({
     /**
      * Returns this translation path as a stable key for test ids and other metadata.
      */
     $key(ctx, key?: string) {
       return (key === undefined ? ctx.keys : [...ctx.keys, key]).join(".");
     },
+  })
+  .extend({
     /**
      * Resolves a runtime-provided key segment under the current translation path.
      * Use it when the final key segment comes from fetched data instead of static code.
@@ -67,8 +58,18 @@ export const createT = tpath<TranslationPath<Translations>, TranslationContext>(
     $loading(ctx, key?: string) {
       return ctx.loadingNamespaces.has(namespaceForKey(ctx.$key(key)));
     },
-  },
-);
+  })
+  .define((ctx, keys, interpolation) => {
+    const message = ctx.messages[keys.join(".")];
+
+    if (message === undefined) {
+      return undefined;
+    }
+
+    return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
+      interpolation as any,
+    ) as string;
+  });
 
 function namespaceForKey(key: string): TranslationNamespace {
   return key.split(".", 1)[0] as TranslationNamespace;
