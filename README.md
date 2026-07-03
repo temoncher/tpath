@@ -1,11 +1,11 @@
 # tpath
 
-tpath is a tiny TypeScript helper for building typed proxy paths. It collects property names into a
-string path, then delegates the runtime behavior to your own resolve function.
+tpath is a tiny TypeScript helper for building typed translation paths.
 
-It is intentionally small enough to copy into a project. There is no npm package to install and no
-published package workflow in this repository. Copy [`tpath.ts`](./tpath.ts) into your source tree,
-import it from a local path, and keep the copy close to the application code that uses it.
+- Type-checked object paths over string-backed translation keys
+- Caller-owned lookup, interpolation, missing-message, and fallback behavior
+- Explicit path collection for custom resolvers and helpers
+- Optional path-bound helpers like `$key`, `$exists`, or dynamic `$`
 
 ## Why tpath?
 
@@ -34,7 +34,10 @@ what should happen when a translation is missing.
 The tradeoff is deliberate: keep the helper simple, keep call sites concise, keep runtime policy
 under your control, and let TypeScript check the paths and arguments you actually use.
 
-## Copy Into A Project
+## Installation
+
+tpath is intentionally small enough to copy into a project. There is no npm package to install and
+no published package workflow in this repository.
 
 1. Copy [`tpath.ts`](./tpath.ts) into your project, for example `src/tpath.ts`.
 2. Import it with a local path.
