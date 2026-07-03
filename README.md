@@ -4,8 +4,8 @@ tpath is a tiny TypeScript helper for building typed translation paths.
 
 - Type-checked object paths over string-backed translation keys
 - Caller-owned lookup, interpolation, missing-message, and fallback behavior
-- Explicit path collection for custom resolvers and helpers
-- Optional path-bound helpers like `$key`, `$exists`, or dynamic `$`
+- Explicit path collection for custom resolvers and extensions
+- Optional path-bound extensions like `$key`, `$exists`, or dynamic `$`
 
 ## Why tpath?
 
@@ -250,10 +250,11 @@ const t = createT({ debug: true, messages });
 t.common.home.title(); // "common.home.title"
 ```
 
-## Translation Helpers
+## Translation Extensions
 
-The second `define` argument can include ordinary `$...` functions. tpath exposes them on every path
-node and passes the current path plus the factory context as the first `ctx` argument.
+The second `define` argument can include ordinary extension functions. tpath exposes them on every
+path node and passes the current path plus the factory context as the first `ctx` argument. The
+examples use `$...` names by convention, but extension names are ordinary object keys.
 
 ```ts
 const loadingKeys = new Set(['common.home.title']);
@@ -278,6 +279,9 @@ const createT = tpath<
     $loading(ctx, key?: string) {
       return ctx.loadingKeys.has(ctx.$key(key));
     },
+    _key(ctx, key?: string) {
+      return ctx.$key(key);
+    },
   },
 );
 
@@ -286,10 +290,11 @@ const t = createT({ loadingKeys, messages });
 t.common.home.title.$key(); // "common.home.title"
 t.common.home.$exists('title'); // true
 t.common.home.title.$loading(); // true
+t.common.home.title._key(); // "common.home.title"
 ```
 
-If your translation tree has real `$...` keys, use a symbol-keyed helper so the string key can stay
-part of the collected path.
+If your translation tree has a string key that matches an extension name, use a symbol-keyed extension so
+the string key can stay part of the collected path.
 
 ```ts
 const exists = Symbol('exists');
@@ -322,7 +327,7 @@ t.common.home.$exists(); // looks up "common.home.$exists"
 t.common.home[exists]('$exists'); // true
 ```
 
-If you need a dynamic-key escape hatch, provide it as another `$...` method. Use the bound
+If you need a dynamic-key escape hatch, provide it as another extension. Use the bound
 `ctx.resolve(keys, ...args)` helper to run the resolve function for an explicit path without mutating
 the current path.
 
@@ -349,8 +354,8 @@ const t = createT({ messages });
 t.common.home.$('greeting', { name: 'Ada' }); // "Hello, Ada!"
 ```
 
-tpath does not include built-in `$`, `$key`, `$exists`, or `$loading` methods. If a `$...` method is
-not provided, it is not part of the typed proxy.
+tpath does not include built-in `$`, `$key`, `$exists`, `$loading`, `_key`, or any other extension.
+If an extension is not provided, it is not part of the typed proxy.
 
 ## Examples
 

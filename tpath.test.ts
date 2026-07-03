@@ -265,7 +265,7 @@ describe('tpath', () => {
     expect(t.common.$('home.greeting', { name: 'Ada' })).toBe('Hello, Ada!');
   });
 
-  test('lets extensions reuse other extension helpers', () => {
+  test('lets extensions reuse other extensions', () => {
     const loadingKeys = new Set(['common.home.title']);
     const createT = tpath<TranslationCalls, { readonly loadingKeys: ReadonlySet<string> }>().define(
       (ctx) => ctx.$key(),
@@ -318,7 +318,7 @@ describe('tpath', () => {
     expect(t.common.home.$loading('title')).toBe(true);
   });
 
-  test('supports symbol-keyed extensions alongside $-prefixed translation keys', () => {
+  test('supports symbol-keyed extensions alongside matching string translation keys', () => {
     const exists = Symbol('exists');
     const messages = {
       'common.home.$exists': 'literal exists key',
@@ -328,13 +328,7 @@ describe('tpath', () => {
       TranslationCallsWithDollarKeys,
       { readonly messages: Readonly<Record<string, string | undefined>> }
     >().define((ctx, keys) => ctx.messages[keys.join('.')], {
-      [exists](
-        ctx: tpath.DefinitionContext<
-          { readonly messages: Readonly<Record<string, string | undefined>> },
-          any
-        >,
-        key?: string,
-      ) {
+      [exists](ctx, key?: string) {
         return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
       },
     });

@@ -130,7 +130,7 @@ test('types resolve-first definitions with second-argument extensions', () => {
   >().define(
     (ctx, keys, interpolation) => {
       expectTypeOf(ctx.messages).toEqualTypeOf<Readonly<Record<string, string | undefined>>>();
-      assertType<string>(ctx.$key());
+      assertType<unknown>(ctx.$key());
       assertType<string | undefined>(
         ctx.resolve<string | undefined>(['common', 'home', 'title'], interpolation),
       );
@@ -238,13 +238,6 @@ test('accepts context as the second tpath generic', () => {
   createT({});
 });
 
-test('treats an empty factory context as no context argument', () => {
-  type Factory = tpath.Factory<TranslationCalls, {}, {}>;
-  type T = tpath.Path<TranslationCalls, {}>;
-
-  expectTypeOf<Factory>().toEqualTypeOf<(ctx?: never) => T>();
-});
-
 test('types ctx-first definition functions', () => {
   const createT = tpath<
     TranslationCalls,
@@ -295,7 +288,7 @@ test('types extension context and public extension arguments', () => {
     }
   >().define(
     (ctx, keys) => {
-      assertType<string>(ctx.$key());
+      assertType<unknown>(ctx.$key());
       assertType<readonly string[]>(keys);
 
       return ctx.messages[keys.join('.')];
@@ -351,25 +344,46 @@ test('types extension context and public extension arguments', () => {
   t.common.home.title.__call();
 });
 
-test('types symbol-keyed extensions alongside $-prefixed translation keys', () => {
+test('types non-dollar extension names as ordinary user-declared extensions', () => {
+  const createT = tpath<
+    TranslationCalls,
+    { readonly messages: Readonly<Record<string, string | undefined>> }
+  >().define(
+    (ctx, keys) => {
+      assertType<unknown>(ctx._key());
+      assertType<unknown>(ctx._exists('title'));
+
+      return ctx.messages[keys.join('.')];
+    },
+    {
+      _key(ctx, key?: string) {
+        return appendKey(ctx.keys, key).join('.');
+      },
+      _exists(ctx, key?: string) {
+        return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
+      },
+    },
+  );
+  const t = createT({
+    messages: {},
+  });
+
+  assertType<string>(t.common.home.title._key());
+  assertType<boolean>(t.common.home._exists('title'));
+
+  // @ts-expect-error extension argument must be a string
+  t.common.home._exists(1);
+});
+
+test('types symbol-keyed extensions alongside matching string translation keys', () => {
   const exists = Symbol('exists');
   const createT = tpath<
     TranslationCallsWithDollarKeys,
     { readonly messages: Readonly<Record<string, string | undefined>> }
   >().define(
-    (ctx, keys) => {
-      assertType<boolean>(ctx[exists]('$exists'));
-
-      return ctx.messages[keys.join('.')];
-    },
+    (ctx, keys) => ctx.messages[keys.join('.')],
     {
-      [exists](
-        ctx: tpath.DefinitionContext<
-          { readonly messages: Readonly<Record<string, string | undefined>> },
-          any
-        >,
-        key?: string,
-      ) {
+      [exists](ctx, key?: string) {
         assertType<readonly string[]>(ctx.keys);
         assertType<string | undefined>(key);
 
@@ -405,23 +419,16 @@ test('types __call as a path key when the translation tree declares it', () => {
   t.common.home.title.__call();
 });
 
-test('does not expose a built-in format helper to the resolve function', () => {
+test('does not expose a built-in format extension to the resolve function', () => {
   tpath<
     TranslationCalls,
     { readonly messages: Readonly<Record<string, string | undefined>> }
-  >().define(
-    (ctx) => {
-      // @ts-expect-error definitions should call ctx.resolve, not format
-      ctx.format(['common', 'home', 'title']);
+  >().define((ctx) => {
+    // @ts-expect-error definitions without extensions should call ctx.resolve, not format
+    ctx.format(['common', 'home', 'title']);
 
-      return ctx.messages[ctx.keys.join('.')];
-    },
-    {
-      $(ctx): string | undefined {
-        return ctx.resolve(['common', 'home', 'title']) as string | undefined;
-      },
-    },
-  );
+    return ctx.messages[ctx.keys.join('.')];
+  });
 });
 
 test('types shared context in formatter and extension context', () => {
