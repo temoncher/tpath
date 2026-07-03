@@ -19,9 +19,9 @@ export const ru = {
       ru: "Русский",
     },
     notes: {
-      count: "{count, plural, one {# заметка} few {# заметки} many {# заметок} other {# заметки}}",
+      count: "{count, plural, one {# заметка} other {# заметок}}",
       empty: "Пока нет заметок",
-      item: "{index, number}. {text}",
+      item: "{index}. {text}",
     },
     title: "Заметки TPath",
   },

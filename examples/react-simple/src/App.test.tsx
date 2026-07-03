@@ -69,15 +69,15 @@ describe("react-simple example", () => {
   });
 
   test("can render keys from the same translator factory in debug mode", () => {
-    const t = createT({ debug: true, locale: "en", messages: en });
+    const t = createT({ debug: true, messages: en });
 
     expect(t.app.title()).toBe("app.title");
     expect(t.app.notes.empty()).toBe("app.notes.empty");
   });
 
   test("uses plain React context values from each render", () => {
-    const regular = createT({ debug: false, locale: "en", messages: en });
-    const debug = createT({ debug: true, locale: "en", messages: en });
+    const regular = createT({ debug: false, messages: en });
+    const debug = createT({ debug: true, messages: en });
 
     expect(regular.app.title()).toBe("TPath Notes");
     expect(debug.app.title()).toBe("app.title");

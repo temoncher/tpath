@@ -18,7 +18,7 @@ export const en = {
     notes: {
       count: "{count, plural, one {# note} other {# notes}}",
       empty: "No notes yet",
-      item: "{index, number}. {text}",
+      item: "{index}. {text}",
     },
     title: "TPath Notes",
   },

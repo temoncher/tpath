@@ -1,44 +1,39 @@
-import { IntlMessageFormat } from "intl-messageformat";
 import { useState } from "react";
 import type { FormEvent } from "react";
 
 import { tpath } from "../../../tpath.ts";
 import { en } from "./translations/en";
+import { formatMessage } from "./translations/formatMessage";
 import { ru } from "./translations/ru";
-import type { Messages } from "./translations/types";
+import type { Messages, TranslationPath } from "./translations/types";
 
 type Translations = typeof en;
 
 interface TranslationContext {
   readonly debug: boolean;
-  readonly locale: string;
   readonly messages: Messages<Translations>;
 }
 
-export const createT = tpath<Translations>()
-  .ctx<TranslationContext>()
-  .define({
-    $exists(ctx, child?: string) {
-      const nextKeys = child === undefined ? ctx.keys : [...ctx.keys, child];
+export const createT = tpath<TranslationPath<Translations>, TranslationContext>().define({
+  $exists(ctx, key?: string) {
+    const nextKeys = key === undefined ? ctx.keys : [...ctx.keys, key];
 
-      return resolveNested(ctx.messages, nextKeys) !== undefined;
-    },
-    __call(ctx, keys, interpolation) {
-      if (ctx.debug) {
-        return keys.join(".");
-      }
+    return resolveNested(ctx.messages, nextKeys) !== undefined;
+  },
+  __call(ctx, keys, interpolation) {
+    if (ctx.debug) {
+      return keys.join(".");
+    }
 
-      const message = resolveNested(ctx.messages, keys);
+    const message = resolveNested(ctx.messages, keys);
 
-      if (message === undefined) {
-        return undefined;
-      }
+    if (message === undefined) {
+      return undefined;
+    }
 
-      return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
-        interpolation as any,
-      ) as string;
-    },
-  });
+    return formatMessage(message, interpolation);
+  },
+});
 
 const translations = {
   en,
@@ -58,7 +53,6 @@ export function App({ initialLocale = "en" }: AppProps = {}) {
   const [text, setText] = useState("");
   const t = createT({
     debug,
-    locale,
     messages: translations[locale],
   });
 

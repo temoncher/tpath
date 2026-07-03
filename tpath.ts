@@ -1,35 +1,56 @@
 /**
- * Creates a typed translation path builder for a translation tree.
+ * Creates a typed proxy path definer.
  *
- * The builder collects property names into a path and delegates every runtime
- * lookup, fallback, interpolation, and error policy to the `__call` method
- * registered with {@link tpath.Builder.define}.
+ * TPath collects property names into a string path, then delegates runtime
+ * behavior to the `__call` method registered with
+ * {@link tpath.Definer.define}. Use nested objects for path segments and
+ * function leaves for typed call sites.
  *
  * ```ts
- * const messages = { 'common.home.title': 'Home' };
- * const createT = tpath<{ common: { home: { title: 'Home' } } }>()
- *     .ctx<{ messages: typeof messages }>()
- *     .define({
- *       __call(ctx, keys) {
- *         return ctx.messages[keys.join('.')];
- *       },
- *     });
- * const t = createT({ messages });
+ * type Translations = {
+ *   readonly common: {
+ *     readonly title: () => string | undefined;
+ *     readonly greeting: (values: { readonly name: string }) => string | undefined;
+ *   };
+ * };
  *
- * t.common.home.title(); // "Home"
+ * type TranslationContext = {
+ *   readonly messages: Readonly<Record<string, string | undefined>>;
+ * };
+ *
+ * const createT = tpath<Translations, TranslationContext>().define({
+ *   __call(ctx, keys, values) {
+ *     const message = ctx.messages[keys.join('.')];
+ *
+ *     return values === undefined ? message : message?.replace('{name}', values.name);
+ *   },
+ * });
+ *
+ * const t = createT({
+ *   messages: {
+ *     'common.title': 'Home',
+ *     'common.greeting': 'Hello, {name}!',
+ *   },
+ * });
+ *
+ * t.common.title(); // "Home"
+ * t.common.greeting({ name: 'Ada' }); // "Hello, Ada!"
  * ```
  */
-export function tpath<TNamespace>(): tpath.Builder<TNamespace> {
-  return createTPathBuilder<TNamespace, {}>();
+export function tpath<TPathTree, TContext extends object = {}>(): tpath.Definer<
+  TPathTree,
+  TContext
+> {
+  return createTPathDefiner<TPathTree, TContext>();
 }
 
 /**
- * Public types that describe TPath builders, factories, translators, and
+ * Public types that describe TPath definers, factories, typed path proxies, and
  * definition callbacks.
  */
 export namespace tpath {
   /**
-   * Immutable user context bound when a translator factory is called.
+   * Immutable user context bound when a path factory is called.
    *
    * ```ts
    * type TContext = tpath.Context<{ locale: string }>;
@@ -38,43 +59,58 @@ export namespace tpath {
   export type Context<TUserContext extends object = {}> = Readonly<TUserContext>;
 
   /**
+   * Function leaf shorthand for typed path trees.
+   *
+   * ```ts
+   * type Api = {
+   *   readonly users: {
+   *     readonly byId: tpath.Leaf<[id: string], Promise<User>>;
+   *   };
+   * };
+   * ```
+   */
+  export type Leaf<TArgs extends readonly unknown[] = [], TReturn = unknown> = (
+    ...args: TArgs
+  ) => TReturn;
+
+  /**
    * Bound helper exposed inside definition methods.
    *
    * Calls the `__call` definition for explicit keys.
    */
-  export type CallHelper = (keys: readonly string[], interpolation?: object) => string | undefined;
+  export type CallHelper = <TReturn = unknown>(keys: readonly string[], ...args: any[]) => TReturn;
 
   /**
-   * Definition object passed to {@link Builder.define}.
+   * Definition object passed to {@link Definer.define}.
    *
    * `__call` is required and handles leaf calls. `$...` methods are exposed on
-   * every translated path node.
+   * every path node.
    */
   export type Definition = Readonly<{
     readonly __call: (
       ctx: DefinitionContext<any, any>,
       keys: readonly string[],
-      interpolation?: object,
-    ) => string | undefined;
+      ...args: any[]
+    ) => unknown;
   }>;
 
   /**
-   * Definition object shape accepted by {@link Builder.define}.
+   * Definition object shape accepted by {@link Definer.define}.
    */
   export type DefinitionInput<TContext extends object> = Readonly<{
     readonly __call: (
       ctx: DefinitionContext<TContext, any>,
       keys: readonly string[],
-      interpolation?: object,
-    ) => string | undefined;
+      ...args: any[]
+    ) => unknown;
   }> &
     Readonly<{
       readonly [key: `$${string}`]: (ctx: DefinitionContext<TContext, any>, ...args: any[]) => any;
     }>;
 
   /**
-   * Result of {@link Builder.define}. Missing or invalid `__call` definitions
-   * produce `never`, so the builder cannot be used as a translator factory.
+   * Result of {@link Definer.define}. Missing or invalid `__call` definitions
+   * produce `never`, so the definer cannot be used as a path factory.
    */
   export type DefineResult<TNamespace, TContext extends object, TDefinition extends object> =
     TDefinition extends DefinitionInput<TContext>
@@ -82,8 +118,7 @@ export namespace tpath {
       : never;
 
   /**
-   * Bound `$...` helpers exposed on translated path nodes and inside definition
-   * methods.
+   * Bound `$...` helpers exposed on path nodes and inside definition methods.
    */
   export type DefinitionHelpers<TDefinition> =
     IsAny<TDefinition> extends true
@@ -124,59 +159,36 @@ export namespace tpath {
     : never;
 
   /**
-   * Typed translator proxy for a namespace and its registered `$...` helpers.
+   * Typed proxy for a path tree and its registered `$...` helpers.
    *
-   * Leaf calls return exactly what `__call` returns: a string or `undefined`.
+   * Function leaves keep their declared public argument and return types. The
+   * runtime value still comes from the caller-owned `__call` definition.
    */
-  export type TPath<TNamespace, TDefinition extends object = {}> = _TPath<TNamespace, TDefinition>;
+  export type TPath<TPathTree, TDefinition extends object = {}> = _TPath<TPathTree, TDefinition>;
 
   /**
-   * Chainable builder used to bind context types and the terminal definition.
+   * Definer used to bind the terminal runtime definition.
    */
-  export interface Builder<TNamespace, TContext extends object = {}> {
+  export interface Definer<TPathTree, TContext extends object = {}> {
     /**
-     * Adds required context fields to the translator factory.
-     *
-     * ```ts
-     * const createT = tpath<Translations>()
-     *   .ctx<{ locale: string }>()
-     *   .define({ __call(ctx) { return ctx.locale; } });
-     * createT({ locale: 'en' });
-     * ```
-     */
-    ctx<TNextContext extends object>(): Builder<TNamespace, TContext & TNextContext>;
-    /**
-     * Finishes the builder by registering the caller-owned definition.
+     * Finishes the definer by registering the caller-owned definition.
      */
     define<TDefinition extends DefinitionInput<TContext>>(
       definition: TDefinition,
-    ): Factory<TNamespace, TContext, TDefinition>;
+    ): Factory<TPathTree, TContext, TDefinition>;
   }
 
   /**
-   * Translator factory produced by {@link Builder.define}.
+   * Path factory produced by {@link Definer.define}.
    *
    * If no context type was declared, the factory is called with no arguments.
    * Otherwise it requires the declared context.
    */
-  export type Factory<TNamespace, TContext extends object, TDefinition extends object> = [
+  export type Factory<TPathTree, TContext extends object, TDefinition extends object> = [
     keyof TContext,
   ] extends [never]
-    ? (ctx?: never) => TPath<TNamespace, TDefinition>
-    : (ctx: Context<TContext>) => TPath<TNamespace, TDefinition>;
-
-  /**
-   * Type helper for selecting one or more namespaces from a translation tree.
-   *
-   * ```ts
-   * type CommonOnly = tpath.PickNs<Translations, ['common']>;
-   * ```
-   */
-  export type PickNs<TNamespaces, Ns> = Ns extends
-    | [infer F extends keyof TNamespaces, ...infer R]
-    | readonly [infer F extends keyof TNamespaces, ...infer R]
-    ? Prettify<{ readonly [K in F]: TNamespaces[F] } & PickNs<TNamespaces, R>>
-    : unknown;
+    ? (ctx?: never) => TPath<TPathTree, TDefinition>
+    : (ctx: Context<TContext>) => TPath<TPathTree, TDefinition>;
 }
 
 /**
@@ -184,111 +196,45 @@ export namespace tpath {
  */
 export default tpath;
 
-type Trim<S extends string> = S extends
-  | ` ${infer R}`
-  | `${infer R} `
-  | `\n${infer R}`
-  | `${infer R}\n`
-  ? Trim<R>
-  : S;
-type AccumulateBeforeClosing<
-  S extends string,
-  TStack extends unknown[] = [],
-  R extends string = '',
-> = S extends `${infer TBeforeClosing}}${infer TAfterClosing}`
-  ? S extends `${infer TBeforeOpening}{${infer TAfterOpening}`
-    ? TBeforeOpening extends `${TBeforeClosing}${string}`
-      ? TStack['length'] extends 0
-        ? `${R}${TBeforeClosing}`
-        : TStack extends [...infer TStart, infer _]
-          ? AccumulateBeforeClosing<TAfterClosing, TStart, `${R}${TBeforeClosing}}`>
-          : never
-      : AccumulateBeforeClosing<TAfterOpening, [...TStack, undefined], `${R}${TBeforeOpening}{`>
-    : TStack['length'] extends 0
-      ? `${R}${TBeforeClosing}`
-      : TStack extends [...infer TStart, infer _]
-        ? AccumulateBeforeClosing<TAfterClosing, TStart, `${R}${TBeforeClosing}}`>
-        : never
-  : `${R}${S}`;
-type ICUTypes = 'number' | 'number, currency' | 'date' | 'time';
-type DetectICU<S extends string> = S extends `${infer TIdentifier}, ${ICUTypes}`
-  ? TIdentifier
-  : S extends `${infer TSelectIdentifier}, select,${infer RestSelect}`
-    ? S extends `${infer TPluralIdentifier}, plural,${infer RestPlural}`
-      ? (
-          TSelectIdentifier extends `${TPluralIdentifier}${string}`
-            ? [TPluralIdentifier, RestPlural]
-            : [TSelectIdentifier, RestSelect]
-        ) extends [infer TIdentifier, infer Rest extends string]
-        ? TIdentifier | GetInterpolationKeys<ParseOneLevelOfInterpolation<Rest>>
-        : never
-      : TSelectIdentifier | GetInterpolationKeys<ParseOneLevelOfInterpolation<RestSelect>>
-    : S extends `${infer TPluralIdentifier}, plural,${infer RestPlural}`
-      ? TPluralIdentifier | GetInterpolationKeys<ParseOneLevelOfInterpolation<RestPlural>>
-      : S;
-type ParseOneLevelOfInterpolation<S extends string> = S extends `${string}{${infer TAfterOpening}`
-  ? AccumulateBeforeClosing<TAfterOpening> extends infer TInside extends string
-    ? TAfterOpening extends `${TInside}}${infer TAfterClosing}`
-      ? Trim<TInside> extends infer TTrimmedInside extends string
-        ? TTrimmedInside | ParseOneLevelOfInterpolation<TAfterClosing>
-        : never
-      : never
-    : never
-  : never;
-type GetInterpolationKeys<S extends string> = DetectICU<ParseOneLevelOfInterpolation<S>>;
-
-type Prettify<T> = { [K in keyof T]: T[K] } & {};
 type IsAny<T> = 0 extends 1 & T ? true : false;
-type InterpolationValues<S extends string> = Readonly<
-  Record<GetInterpolationKeys<S>, string | number>
->;
-type TFunctionParams<TNamespace, TKey extends keyof TNamespace> = TNamespace[TKey] extends string
-  ? TNamespace[TKey] extends `${string}{${string}}${string}`
-    ? [interpolation: InterpolationValues<TNamespace[TKey]>]
-    : []
-  : never;
 
-type TLeafFunction<
-  TNamespace,
-  K extends keyof TNamespace,
-  TDefinition extends object,
-> = tpath.DefinitionHelpers<ExtractDefinition<TDefinition>> &
-  ((...params: TFunctionParams<TNamespace, K>) => string | undefined);
-
-type _TPath<TNamespace, TDefinition extends object> = tpath.DefinitionHelpers<
+type TLeafFunction<TLeaf, TDefinition extends object> = tpath.DefinitionHelpers<
   ExtractDefinition<TDefinition>
-> & {
-  readonly [K in keyof TNamespace]: TNamespace[K] extends string
-    ? TLeafFunction<TNamespace, K, TDefinition>
-    : _TPath<TNamespace[K], TDefinition>;
-};
+> &
+  (TLeaf extends (...args: infer TArgs) => infer TReturn ? (...args: TArgs) => TReturn : never);
+
+type _TPath<TPathTree, TDefinition extends object> = tpath.DefinitionHelpers<
+  ExtractDefinition<TDefinition>
+> &
+  (TPathTree extends (...args: any[]) => unknown
+    ? TLeafFunction<TPathTree, TDefinition>
+    : TPathTree extends object
+      ? { readonly [K in keyof TPathTree]: _TPath<TPathTree[K], TDefinition> }
+      : never);
 
 type ExtractDefinition<TDefinition extends object> = TDefinition;
 
-function createTPathBuilder<TNamespace, TContext extends object>(): tpath.Builder<
-  TNamespace,
+function createTPathDefiner<TPathTree, TContext extends object>(): tpath.Definer<
+  TPathTree,
   TContext
 > {
   return {
-    ctx<TNextContext extends object>() {
-      return createTPathBuilder<TNamespace, TContext & TNextContext>();
-    },
     define<TDefinition extends tpath.DefinitionInput<TContext>>(definition: TDefinition) {
       return ((ctx = {} as tpath.Context<TContext>) =>
-        createTPathProxy<TNamespace, TContext, TDefinition>(
+        createTPathProxy<TPathTree, TContext, TDefinition>(
           definition as unknown as TDefinition & tpath.Definition,
           [],
           ctx,
-        )) as tpath.DefineResult<TNamespace, TContext, TDefinition>;
+        )) as tpath.DefineResult<TPathTree, TContext, TDefinition>;
     },
   };
 }
 
-function createTPathProxy<TNamespace, TContext extends object, TDefinition extends object>(
+function createTPathProxy<TPathTree, TContext extends object, TDefinition extends object>(
   definition: TDefinition & tpath.Definition,
   previousPath: readonly string[],
   ctx: tpath.Context<TContext>,
-): tpath.TPath<TNamespace, TDefinition> {
+): tpath.TPath<TPathTree, TDefinition> {
   return new Proxy(() => undefined, {
     get(_target, key) {
       if (typeof key === 'symbol') {
@@ -311,20 +257,20 @@ function createTPathProxy<TNamespace, TContext extends object, TDefinition exten
       return createTPathProxy(definition, [...previousPath, key], ctx);
     },
     apply(_target, _thisArg, argArray: unknown[]) {
-      return callDefinition(definition, previousPath, ctx, argArray[0] as object | undefined);
+      return callDefinition(definition, previousPath, ctx, argArray);
     },
-  }) as unknown as tpath.TPath<TNamespace, TDefinition>;
+  }) as unknown as tpath.TPath<TPathTree, TDefinition>;
 }
 
 function callDefinition<TContext extends object, TDefinition extends object>(
   definition: TDefinition & tpath.Definition,
   keys: readonly string[],
   ctx: tpath.Context<TContext>,
-  interpolation: object | undefined,
+  args: readonly unknown[],
 ) {
   const definitionContext = createDefinitionContext(definition, keys, ctx);
 
-  return definition.__call(definitionContext, definitionContext.keys, interpolation);
+  return definition.__call(definitionContext, definitionContext.keys, ...args);
 }
 
 function createDefinitionContext<TContext extends object, TDefinition extends object>(
@@ -336,8 +282,8 @@ function createDefinitionContext<TContext extends object, TDefinition extends ob
   const self: Record<PropertyKey, unknown> = {
     ...ctx,
     keys: currentKeys,
-    __call(nextKeys: readonly string[], nextInterpolation?: object) {
-      return callDefinition(definition, nextKeys, ctx, nextInterpolation);
+    __call<TReturn = unknown>(nextKeys: readonly string[], ...nextArgs: any[]) {
+      return callDefinition(definition, nextKeys, ctx, nextArgs) as TReturn;
     },
   };
 

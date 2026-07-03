@@ -16,7 +16,6 @@
     "test": "vitest run --config vitest.config.ts"
   },
   "dependencies": {
-    "intl-messageformat": "^10.7.18",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

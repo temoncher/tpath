@@ -19,7 +19,7 @@ flight.
 - Static translation JSON served by Vite from `public/translations`.
 - `tools/generate-translations.ts`, which turns each flat English JSON file into
   `<namespace>.gen.ts`.
-- Generated nested messages used as `typeof en` for TPath inference.
+- Generated nested messages adapted with `src/shared/TranslationPath.ts` for TPath inference.
 - Generated English messages imported in tests as stable mock values.
 - Async translation loading owned by React, with the shell and every route fetching only its own
   namespace file.
@@ -71,6 +71,7 @@ pnpm build
 ## Files To Read
 
 - `tools/generate-translations.ts` contains the flat-JSON to nested-TS generator.
+- `src/shared/TranslationPath.ts` contains the full translation path type adapter.
 - `src/shared/createT.ts` contains the TPath factory, `__call`, `$`, `$key`, `$error`, and
   `$loading`.
 - `src/shared/useT.ts` contains async locale query composition.

@@ -2,6 +2,5 @@
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "entry": ["src/main.tsx", "src/**/*.test.tsx", "src/test/setup.ts", "*.config.ts"],
   "project": ["src/**/*.{ts,tsx}", "*.config.ts"],
-  "ignoreDependencies": ["intl-messageformat"],
   "includeEntryExports": true
 }

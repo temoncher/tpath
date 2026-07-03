@@ -1,7 +1,7 @@
 # TPath
 
-TPath is a tiny TypeScript translation helper for building typed translation paths with almost no
-runtime machinery.
+TPath is a tiny TypeScript helper for building typed proxy paths. It collects property names into a
+string path, then delegates the runtime behavior to your own `__call` definition.
 
 It is intentionally small enough to copy into a project. There is no npm package to install and no
 published package workflow in this repository. Copy [`tpath.ts`](./tpath.ts) into your source tree,
@@ -17,127 +17,125 @@ import it from a local path, and keep the copy close to the application code tha
 import { tpath } from './tpath';
 ```
 
-## Basic Usage
+## Basic Translation Usage
 
-Describe your translation tree as a TypeScript type, then build a translator factory. TPath collects
-the path keys and calls your `__call` definition when a leaf is invoked. That definition decides
-how those keys map to dictionaries, namespaces, locales, remote data, parsing libraries, or anything
-else.
+Start with your source locale as a literal object, then map that shape into callable translation
+paths. TPath keeps the nested keys typed, while your `__call` definition decides how those keys map
+to dictionaries, formatting, debug output, or missing-key behavior.
 
 ```ts
 import { tpath } from './tpath';
 
-interface Translations {
-  readonly common: {
-    readonly home: {
-      readonly title: 'Home';
-      readonly greeting: 'Hello, {name}!';
-    };
-  };
-}
+const en = {
+  common: {
+    home: {
+      title: 'Home',
+      greeting: 'Hello, {name}!',
+    },
+  },
+} as const;
+
+type Translations = typeof en;
+
+type TranslationPath<T> = {
+  readonly [K in keyof T]: T[K] extends string
+    ? TranslationCall<T[K]>
+    : T[K] extends object
+      ? TranslationPath<T[K]>
+      : never;
+};
+
+type TranslationCall<TMessage extends string> =
+  InterpolationKey<TMessage> extends never
+    ? () => string | undefined
+    : (
+        interpolation: Readonly<Record<InterpolationKey<TMessage>, string | number>>,
+      ) => string | undefined;
+
+type InterpolationKey<TMessage extends string> =
+  TMessage extends `${string}{${infer TPlaceholder}}${infer TRest}`
+    ? PlaceholderName<TPlaceholder> | InterpolationKey<TRest>
+    : never;
+
+type PlaceholderName<TPlaceholder extends string> =
+  Trim<TPlaceholder> extends `${infer TName},${string}` ? Trim<TName> : Trim<TPlaceholder>;
+
+type Trim<S extends string> = S extends ` ${infer R}` | `${infer R} ` ? Trim<R> : S;
 
 const messages = {
   'common.home.title': 'Home',
   'common.home.greeting': 'Hello, {name}!',
 };
 
-const createT = tpath<Translations>()
-  .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
-  .define({
-    __call(ctx, keys) {
-      return ctx.messages[keys.join('.')];
-    },
+function formatMessage(
+  message: string,
+  values: Readonly<Record<string, string | number | undefined>> = {},
+) {
+  return message.replace(/\{([A-Za-z0-9_]+)\}/g, (match, key: string) => {
+    const value = values[key];
+
+    return value === undefined ? match : String(value);
   });
+}
+
+const createT = tpath<
+  TranslationPath<Translations>,
+  {
+    readonly messages: Readonly<Record<string, string | undefined>>;
+  }
+>().define({
+  __call(ctx, keys, interpolation) {
+    const message = ctx.messages[keys.join('.')];
+
+    if (message === undefined) {
+      return undefined;
+    }
+
+    return formatMessage(message, interpolation);
+  },
+});
 
 const t = createT({ messages });
 
 t.common.home.title(); // "Home"
-t.common.home.greeting({ name: 'Ada' }); // "Hello, {name}!"
-```
-
-The `__call` definition is required before the builder can create translators. TPath does not
-parse messages at runtime by itself. Interpolation types are still inferred from ICU
-MessageFormat-shaped string literals. The type-level parser is designed around the
-[ICU message format](https://unicode-org.github.io/icu/userguide/format_parse/messages/?utm_source=chatgpt.com),
-but runtime parsing is deliberately caller-owned.
-
-The call definition also owns missing-translation and error behavior. TPath returns the definition
-result as-is: if `__call` returns `undefined`, the translated call returns `undefined`; if `__call`
-throws, the error propagates to the caller.
-
-If you want ICU formatting with `intl-messageformat`, call it inside `__call`:
-
-```sh
-pnpm add intl-messageformat
-```
-
-```ts
-import { IntlMessageFormat } from 'intl-messageformat';
-import { tpath } from './tpath';
-
-const createT = tpath<Translations>()
-  .ctx<{
-    readonly locale: string;
-    readonly messages: Readonly<Record<string, string | undefined>>;
-  }>()
-  .define({
-    __call(ctx, keys, interpolation) {
-      const message = ctx.messages[keys.join('.')];
-
-      if (message === undefined) {
-        return undefined;
-      }
-
-      return new IntlMessageFormat(message, ctx.locale, undefined, { ignoreTag: true }).format(
-        interpolation as any,
-      ) as string;
-    },
-  });
-
-const t = createT({
-  locale: 'en',
-  messages,
-});
-
 t.common.home.greeting({ name: 'Ada' }); // "Hello, Ada!"
+t.common.home.greeting(); // TypeScript error
 ```
 
-Missing translations are caller-owned:
+The local `TranslationPath` adapter is not part of TPath itself. It is just the type-level bridge
+between your message literals and callable leaves. The simple examples keep a compact adapter in
+`examples/*-simple/src/translations/types.ts`; the complex React example keeps a fuller parser in
+`examples/react-complex/src/shared/TranslationPath.ts`.
 
-```ts
-t.common.home.missing(); // TypeScript error
-t.common.home.title(); // undefined if __call returns undefined
-```
-
-If you want joined-key fallback or debug output, return `keys.join('.')` from `__call`.
-
-## Caller-Owned Formatting
+## Caller-Owned Lookup
 
 The `__call` definition receives a `ctx` first argument with the context fields passed to the
-factory, then an explicit `keys` array for the collected path. The same path is also available on
-`ctx.keys` for helper methods that inspect the current node. TPath does not decide which part of
-the path is a namespace.
+factory, then an explicit `keys` array for the collected path. TPath does not decide which part of
+the path is a namespace, how dictionaries are stored, or what should happen when a message is
+missing.
 
 ```ts
 const dictionaries = {
   common: {
     'home.title': 'Home',
+    'home.greeting': 'Hello, {name}!',
   },
 };
 
-const createT = tpath<Translations>()
-  .ctx<{ readonly dictionaries: typeof dictionaries }>()
-  .define({
-    __call(ctx, keys) {
-      const [namespace, ...messagePath] = keys;
+const createT = tpath<
+  TranslationPath<Translations>,
+  { readonly dictionaries: typeof dictionaries }
+>().define({
+  __call(ctx, keys) {
+    const [namespace, ...messagePath] = keys;
 
-      if (namespace === undefined) {
-        return undefined;
-      }
+    if (namespace === undefined) {
+      return undefined;
+    }
 
-      return ctx.dictionaries[namespace]?.[messagePath.join('.')];
-    },
-  });
+    return ctx.dictionaries[namespace]?.[messagePath.join('.')];
+  },
+});
 
 const t = createT({ dictionaries });
 
@@ -145,10 +143,38 @@ t.common.home.title(); // lookup receives ["common", "home", "title"]
 ```
 
 That keeps storage policy outside the helper. You can join with dots, split on the first namespace,
-load by locale, merge several dictionaries, provide a fallback, throw on missing keys, or use a
-completely different key strategy.
+load by locale, merge several dictionaries, return `undefined`, throw on missing keys, or provide a
+fallback string.
 
-## Definition Patterns
+## Fallback And Debug Policy
+
+TPath returns the `__call` result as-is. If `__call` returns `undefined`, the translated call returns
+`undefined`; if `__call` throws, the error propagates. If you want joined-key fallback or debug-key
+rendering, make that part of your definition.
+
+```ts
+const createT = tpath<
+  TranslationPath<Translations>,
+  {
+    readonly debug: boolean;
+    readonly messages: Readonly<Record<string, string | undefined>>;
+  }
+>().define({
+  __call(ctx, keys) {
+    if (ctx.debug) {
+      return keys.join('.');
+    }
+
+    return ctx.messages[keys.join('.')];
+  },
+});
+
+const t = createT({ debug: true, messages });
+
+t.common.home.title(); // "common.home.title"
+```
+
+## Translation Helpers
 
 Definitions can include ordinary `$...` functions. TPath exposes them on every path node and passes
 the current path plus the factory context as the first `ctx` argument.
@@ -156,129 +182,66 @@ the current path plus the factory context as the first `ctx` argument.
 ```ts
 const loadingKeys = new Set(['common.home.title']);
 
-const createT = tpath<Translations>()
-  .ctx<{
+const createT = tpath<
+  TranslationPath<Translations>,
+  {
     readonly loadingKeys: ReadonlySet<string>;
     readonly messages: Readonly<Record<string, string | undefined>>;
-  }>()
-  .define({
-    $exists(ctx, child?: string) {
-      return (
-        ctx.messages[(child === undefined ? ctx.keys : [...ctx.keys, child]).join('.')] !==
-        undefined
-      );
-    },
-    $loading(ctx, child?: string) {
-      return ctx.loadingKeys.has((child === undefined ? ctx.keys : [...ctx.keys, child]).join('.'));
-    },
-    __call(ctx, keys) {
-      return ctx.messages[keys.join('.')];
-    },
-  });
+  }
+>().define({
+  $key(ctx, key?: string) {
+    return (key === undefined ? ctx.keys : [...ctx.keys, key]).join('.');
+  },
+  $exists(ctx, key?: string) {
+    return ctx.messages[ctx.$key(key)] !== undefined;
+  },
+  $loading(ctx, key?: string) {
+    return ctx.loadingKeys.has(ctx.$key(key));
+  },
+  __call(ctx, keys) {
+    return ctx.messages[keys.join('.')];
+  },
+});
 
 const t = createT({ loadingKeys, messages });
 
-t.common.home.title.$exists(); // true
+t.common.home.title.$key(); // "common.home.title"
 t.common.home.$exists('title'); // true
 t.common.home.title.$loading(); // true
 ```
 
-If you want a dynamic-key escape hatch, provide it as another `$...` method. Use the bound
-`ctx.__call(keys, interpolation)` helper to call `__call` for an explicit path without mutating the
-current path.
+If you need a dynamic-key escape hatch, provide it as another `$...` method. Use the bound
+`ctx.__call<TReturn>(keys, ...args)` helper to call `__call` for an explicit path without mutating
+the current path.
 
 ```ts
-const createT = tpath<Translations>()
-  .ctx<{ readonly messages: Readonly<Record<string, string | undefined>> }>()
-  .define({
-    __call(ctx, keys, interpolation) {
-      const message = ctx.messages[keys.join('.')];
-      const values = interpolation as { readonly name: string };
+const createT = tpath<
+  TranslationPath<Translations>,
+  { readonly messages: Readonly<Record<string, string | undefined>> }
+>().define({
+  $(ctx, key: string, interpolation?: object) {
+    return ctx.__call<string | undefined>([...ctx.keys, key], interpolation);
+  },
+  __call(ctx, keys, interpolation) {
+    const message = ctx.messages[keys.join('.')];
+    const values = interpolation as { readonly name: string } | undefined;
 
-      return message?.replace('{name}', values.name);
-    },
-    $(ctx, child: string, interpolation?: object) {
-      return ctx.__call([...ctx.keys, child], interpolation);
-    },
-  });
+    return values === undefined ? message : message?.replace('{name}', values.name);
+  },
+});
 
 const t = createT({ messages });
 
-t.common.$('home.greeting', { name: 'Ada' }); // "Hello, Ada!"
+t.common.home.$('greeting', { name: 'Ada' }); // "Hello, Ada!"
 ```
 
-TPath does not include built-in `$` or `$exists` methods. If a `$...` method is not provided, it is not
-part of the typed proxy.
-
-The call definition and named `$...` methods receive the same context fields passed to the factory:
-
-```ts
-const createT = tpath<Translations>()
-  .ctx<{
-    readonly debug: boolean;
-    readonly locale: string;
-    readonly messages: Readonly<Record<string, string | undefined>>;
-  }>()
-  .define({
-    $locale(ctx) {
-      return ctx.locale;
-    },
-    $debug(ctx) {
-      return ctx.debug;
-    },
-    __call(ctx, keys) {
-      if (ctx.debug) return keys.join('.');
-
-      return ctx.messages[keys.join('.')];
-    },
-  });
-
-const t = createT({ debug: false, locale: 'en', messages });
-
-t.common.home.title.$locale(); // "en"
-```
-
-## Debug Pattern
-
-TPath does not have built-in debug behavior. If you want every call to return the joined key, make
-that part of your `__call` policy:
-
-```ts
-const createT = tpath<Translations>()
-  .ctx<{
-    readonly debug: boolean;
-    readonly messages: Readonly<Record<string, string | undefined>>;
-  }>()
-  .define({
-    __call(ctx, keys) {
-      if (ctx.debug) return keys.join('.');
-
-      return ctx.messages[keys.join('.')];
-    },
-  });
-
-const t = createT({ debug: true, messages });
-
-t.common.home.title(); // "common.home.title"
-```
-
-## Development
-
-This repository exists to keep the copyable source tested and formatted.
-
-```sh
-pnpm install
-pnpm test
-pnpm test:types
-pnpm typecheck
-pnpm lint
-pnpm format
-```
+TPath does not include built-in `$`, `$key`, `$exists`, or `$loading` methods. If a `$...` method is
+not provided, it is not part of the typed proxy.
 
 ## Examples
 
-The `examples/react-simple` app shows the builder API in a small React app with typed paths,
-context-bound messages, interpolation, debug-key rendering, and an opt-in `$...` method.
+The `examples/react-simple` app shows the definer API in a small React app with typed translation
+paths, context-bound messages, interpolation, debug-key rendering, and an opt-in `$...` method.
 
 ```sh
 pnpm --dir examples/react-simple install
@@ -319,6 +282,58 @@ pnpm --dir examples/react-complex generate:translations
 pnpm --dir examples/react-complex dev
 pnpm --dir examples/react-complex test
 pnpm --dir examples/react-complex build
+```
+
+## By The Way: Not Only Translations
+
+TPath is translation-shaped because that is the main use case here, but the core does not know what
+a translation is. It only turns property access into typed calls and passes the collected keys to
+your definition.
+
+For example, the same helper can describe a typed API path surface:
+
+```ts
+import { tpath } from './tpath';
+
+interface User {
+  readonly id: string;
+  readonly name: string;
+}
+
+interface ApiPaths {
+  readonly users: {
+    readonly byId: (id: string) => Promise<User>;
+    readonly search: (query: string, limit?: number) => Promise<readonly User[]>;
+  };
+}
+
+const p = tpath<
+  ApiPaths,
+  { readonly request: (keys: readonly string[], args: readonly unknown[]) => unknown }
+>().define({
+  __call(ctx, keys, ...args) {
+    return ctx.request(keys, args);
+  },
+})({ request });
+
+p.users.byId('42'); // Promise<User>
+p.users.search('ada', 10); // Promise<readonly User[]>
+```
+
+The same rule still applies: TPath gives you typed paths, and your `__call` definition owns the
+runtime boundary.
+
+## Development
+
+This repository exists to keep the copyable source tested and formatted.
+
+```sh
+pnpm install
+pnpm test
+pnpm test:types
+pnpm typecheck
+pnpm lint
+pnpm format
 ```
 
 The package is marked `"private": true` because TPath is intended to be copied, not published.

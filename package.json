@@ -2,7 +2,7 @@
   "name": "tpath",
   "version": "0.0.0",
   "private": true,
-  "description": "A tiny copy-file translation path helper for TypeScript.",
+  "description": "A tiny copy-file proxy path helper for TypeScript.",
   "license": "MIT",
   "author": "Artem Baranov <temoncher@yandex.ru>",
   "repository": {

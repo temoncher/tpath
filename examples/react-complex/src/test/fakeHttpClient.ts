@@ -1,7 +1,7 @@
 import type { HttpClient } from "../shared/httpClient";
 
 const repository = {
-  description: "A tiny copy-file translation path helper for TypeScript.",
+  description: "A tiny copy-file proxy path helper for TypeScript.",
   forks_count: 8,
   full_name: "temoncher/tpath",
   html_url: "https://github.com/temoncher/tpath",
