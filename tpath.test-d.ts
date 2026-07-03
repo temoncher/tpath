@@ -20,6 +20,24 @@ interface TranslationCalls {
   };
 }
 
+interface TranslationCallsWithDollarKeys {
+  readonly common: {
+    readonly home: {
+      readonly $exists: () => string | undefined;
+      readonly title: () => string | undefined;
+    };
+  };
+}
+
+interface TranslationCallsWithDefinitionKey {
+  readonly common: {
+    readonly home: {
+      readonly __call: () => string | undefined;
+      readonly title: () => string | undefined;
+    };
+  };
+}
+
 interface User {
   readonly id: string;
 }
@@ -275,6 +293,52 @@ test('types extension context and public extension arguments', () => {
   t.common.home.$loading('title', 'high');
 
   // @ts-expect-error __call is not exposed as a path extension
+  t.common.home.title.__call();
+});
+
+test('types symbol-keyed extensions alongside $-prefixed translation keys', () => {
+  const exists = Symbol('exists');
+  const t = tpath<
+    TranslationCallsWithDollarKeys,
+    { readonly messages: Readonly<Record<string, string | undefined>> }
+  >().define({
+    [exists](ctx, key?: string) {
+      expectTypeOf(ctx.keys).toEqualTypeOf<readonly string[]>();
+      assertType<string | undefined>(key);
+
+      return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
+    },
+    __call(ctx, keys) {
+      assertType<boolean>(ctx[exists]('$exists'));
+
+      return ctx.messages[keys.join('.')];
+    },
+  })({
+    messages: {},
+  });
+
+  assertType<string | undefined>(t.common.home.$exists());
+  assertType<boolean>(t.common.home[exists]('$exists'));
+});
+
+test('types __call as a path key when the translation tree declares it', () => {
+  const t = tpath<
+    TranslationCallsWithDefinitionKey,
+    { readonly messages: Readonly<Record<string, string | undefined>> }
+  >().define({
+    __call(ctx, keys) {
+      assertType<string | undefined>(ctx.__call(['common', 'home', '__call']));
+
+      return ctx.messages[keys.join('.')];
+    },
+  })({
+    messages: {},
+  });
+
+  assertType<string | undefined>(t.common.home.__call());
+  assertType<string | undefined>(t.common.home.title());
+
+  // @ts-expect-error __call is not exposed unless the path tree declares it
   t.common.home.title.__call();
 });
 

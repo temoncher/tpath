@@ -210,6 +210,38 @@ t.common.home.$exists('title'); // true
 t.common.home.title.$loading(); // true
 ```
 
+If your translation tree has real `$...` keys, use a symbol-keyed helper so the string key can stay
+part of the collected path.
+
+```ts
+const exists = Symbol('exists');
+
+const createT = tpath<
+  {
+    readonly common: {
+      readonly home: {
+        readonly $exists: () => string | undefined;
+      };
+    };
+  },
+  { readonly messages: Readonly<Record<string, string | undefined>> }
+>().define({
+  [exists](ctx, key?: string) {
+    const keys = key === undefined ? ctx.keys : [...ctx.keys, key];
+
+    return ctx.messages[keys.join('.')] !== undefined;
+  },
+  __call(ctx, keys) {
+    return ctx.messages[keys.join('.')];
+  },
+});
+
+const t = createT({ messages });
+
+t.common.home.$exists(); // looks up "common.home.$exists"
+t.common.home[exists]('$exists'); // true
+```
+
 If you need a dynamic-key escape hatch, provide it as another `$...` method. Use the bound
 `ctx.__call<TReturn>(keys, ...args)` helper to call `__call` for an explicit path without mutating
 the current path.

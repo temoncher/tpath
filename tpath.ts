@@ -83,8 +83,8 @@ export namespace tpath {
   /**
    * Definition object passed to {@link Definer.define}.
    *
-   * `__call` is required and handles leaf calls. `$...` methods are exposed on
-   * every path node.
+   * `__call` is required and handles leaf calls. `$...` and symbol-keyed
+   * methods are exposed on every path node.
    */
   export type Definition = Readonly<{
     readonly __call: (
@@ -106,6 +106,7 @@ export namespace tpath {
   }> &
     Readonly<{
       readonly [key: `$${string}`]: (ctx: DefinitionContext<TContext, any>, ...args: any[]) => any;
+      readonly [key: symbol]: (ctx: DefinitionContext<TContext, any>, ...args: any[]) => any;
     }>;
 
   /**
@@ -118,15 +119,17 @@ export namespace tpath {
       : never;
 
   /**
-   * Bound `$...` helpers exposed on path nodes and inside definition methods.
+   * Bound extension helpers exposed on path nodes and inside definition methods.
    */
   export type DefinitionHelpers<TDefinition> =
     IsAny<TDefinition> extends true
-      ? { readonly [key: `$${string}`]: (...args: any[]) => any }
+      ? { readonly [key: `$${string}`]: (...args: any[]) => any } & {
+          readonly [key: symbol]: (...args: any[]) => any;
+        }
       : {
-          readonly [K in keyof TDefinition as K extends `$${string}` ? K : never]: DefinitionMethod<
-            TDefinition[K]
-          >;
+          readonly [K in keyof TDefinition as K extends `$${string}` | symbol
+            ? K
+            : never]: DefinitionMethod<TDefinition[K]>;
         };
 
   /**
@@ -147,6 +150,7 @@ export namespace tpath {
     readonly __call: CallHelper;
   } & DefinitionHelpers<TDefinition> & {
       readonly [key: `$${string}`]: (...args: any[]) => any;
+      readonly [key: symbol]: (...args: any[]) => any;
     };
 
   /**
@@ -238,13 +242,14 @@ function createTPathProxy<TPathTree, TContext extends object, TDefinition extend
   return new Proxy(() => undefined, {
     get(_target, key) {
       if (typeof key === 'symbol') {
-        throw new TypeError(
-          'Using Symbol as a key is not supported, as the proxy only works with strings.',
-        );
-      }
+        const extension = getExtension(definition, key);
 
-      if (key === '__call') {
-        throw new TypeError('__call is reserved for tpath definitions.');
+        if (extension !== undefined) {
+          return (...args: unknown[]) =>
+            extension(createDefinitionContext(definition, previousPath, ctx), ...args);
+        }
+
+        throw new TypeError('Using Symbol as a path key is not supported.');
       }
 
       const extension = getExtension(definition, key);
@@ -287,8 +292,8 @@ function createDefinitionContext<TContext extends object, TDefinition extends ob
     },
   };
 
-  for (const key of Object.keys(definition)) {
-    if (!key.startsWith('$')) {
+  for (const key of Reflect.ownKeys(definition)) {
+    if (typeof key === 'string' && !key.startsWith('$')) {
       continue;
     }
 
@@ -305,13 +310,13 @@ function createDefinitionContext<TContext extends object, TDefinition extends ob
 
 function getExtension<TDefinition extends object>(
   definition: TDefinition & tpath.Definition,
-  key: string,
+  key: PropertyKey,
 ) {
-  if (!key.startsWith('$')) {
+  if (typeof key === 'string' && !key.startsWith('$')) {
     return undefined;
   }
 
-  return (definition as Readonly<Record<string, ((...args: unknown[]) => unknown) | undefined>>)[
-    key
-  ];
+  const value = (definition as Readonly<Record<PropertyKey, unknown>>)[key];
+
+  return typeof value === 'function' ? value : undefined;
 }

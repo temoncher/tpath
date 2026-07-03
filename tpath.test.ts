@@ -22,6 +22,24 @@ interface TranslationCalls {
   };
 }
 
+interface TranslationCallsWithDollarKeys {
+  readonly common: {
+    readonly home: {
+      readonly $exists: () => string | undefined;
+      readonly title: () => string | undefined;
+    };
+  };
+}
+
+interface TranslationCallsWithDefinitionKey {
+  readonly common: {
+    readonly home: {
+      readonly __call: () => string | undefined;
+      readonly title: () => string | undefined;
+    };
+  };
+}
+
 interface User {
   readonly id: string;
 }
@@ -280,6 +298,47 @@ describe('tpath', () => {
     expect(t.common.home.missing.$exists()).toBe(false);
     expect(t.common.home.title.$loading()).toBe(true);
     expect(t.common.home.$loading('title')).toBe(true);
+  });
+
+  test('supports symbol-keyed extensions alongside $-prefixed translation keys', () => {
+    const exists = Symbol('exists');
+    const messages = {
+      'common.home.$exists': 'literal exists key',
+      'common.home.title': 'Home',
+    };
+    const t = tpath<
+      TranslationCallsWithDollarKeys,
+      { readonly messages: Readonly<Record<string, string | undefined>> }
+    >().define({
+      [exists](ctx, key?: string) {
+        return ctx.messages[appendKey(ctx.keys, key).join('.')] !== undefined;
+      },
+      __call(ctx, keys) {
+        return ctx.messages[keys.join('.')];
+      },
+    })({ messages });
+
+    expect(t.common.home.$exists()).toBe('literal exists key');
+    expect(t.common.home[exists]('$exists')).toBe(true);
+    expect(t.common.home[exists]('missing')).toBe(false);
+  });
+
+  test('collects __call as a path key when the translation tree declares it', () => {
+    const messages = {
+      'common.home.__call': 'literal definition key',
+      'common.home.title': 'Home',
+    };
+    const t = tpath<
+      TranslationCallsWithDefinitionKey,
+      { readonly messages: Readonly<Record<string, string | undefined>> }
+    >().define({
+      __call(ctx, keys) {
+        return ctx.messages[keys.join('.')];
+      },
+    })({ messages });
+
+    expect(t.common.home.__call()).toBe('literal definition key');
+    expect(t.common.home.title()).toBe('Home');
   });
 
   test('passes bound context into extension context', () => {
