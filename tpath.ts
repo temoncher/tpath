@@ -1,7 +1,7 @@
 /**
  * Creates a typed proxy path definer.
  *
- * TPath collects property names into a string path, then delegates runtime
+ * tpath collects property names into a string path, then delegates runtime
  * behavior to the resolve function registered with
  * {@link tpath.Definer.define}. Use nested objects for path segments and
  * function leaves for typed call sites.
@@ -35,15 +35,15 @@
  * t.common.greeting({ name: 'Ada' }); // "Hello, Ada!"
  * ```
  */
-export function tpath<TPathTree, TContext extends object = {}>(): tpath.Definer<
-  TPathTree,
+export function tpath<TTree, TContext extends object = {}>(): tpath.Definer<
+  TTree,
   TContext
 > {
-  return createTPathDefiner<TPathTree, TContext>();
+  return createPathDefiner<TTree, TContext>();
 }
 
 /**
- * Public types that describe TPath definers, factories, typed path proxies, and
+ * Public types that describe tpath definers, factories, typed path proxies, and
  * definition callbacks.
  */
 export namespace tpath {
@@ -55,21 +55,6 @@ export namespace tpath {
    * ```
    */
   export type Context<TUserContext extends object = {}> = Readonly<TUserContext>;
-
-  /**
-   * Function leaf shorthand for typed path trees.
-   *
-   * ```ts
-   * type Api = {
-   *   readonly users: {
-   *     readonly byId: tpath.Leaf<[id: string], Promise<User>>;
-   *   };
-   * };
-   * ```
-   */
-  export type Leaf<TArgs extends readonly unknown[] = [], TReturn = unknown> = (
-    ...args: TArgs
-  ) => TReturn;
 
   /**
    * Bound helper exposed inside definition methods.
@@ -159,23 +144,23 @@ export namespace tpath {
    * Function leaves keep their declared public argument and return types. The
    * runtime value still comes from the caller-owned resolve function.
    */
-  export type TPath<TPathTree, TDefinition extends object = {}> = _TPath<TPathTree, TDefinition>;
+  export type Path<TTree, TDefinition extends object = {}> = PathProxy<TTree, TDefinition>;
 
   /**
    * Definer used to bind the terminal runtime definition.
    */
-  export interface Definer<TPathTree, TContext extends object = {}> {
+  export interface Definer<TTree, TContext extends object = {}> {
     /**
      * Finishes the definer by registering the caller-owned definition.
      */
     define<TDefinition extends Record<string, DefinitionFunction>>(
       resolve: DefinitionResolve<TContext, any>,
       definition: TDefinition,
-    ): Factory<TPathTree, TContext, TDefinition>;
+    ): Factory<TTree, TContext, TDefinition>;
     define(
       resolve: DefinitionResolve<TContext, {}>,
       definition?: undefined,
-    ): Factory<TPathTree, TContext, {}>;
+    ): Factory<TTree, TContext, {}>;
   }
 
   /**
@@ -184,11 +169,11 @@ export namespace tpath {
    * If no context type was declared, the factory is called with no arguments.
    * Otherwise it requires the declared context.
    */
-  export type Factory<TPathTree, TContext extends object, TDefinition extends object> = [
+  export type Factory<TTree, TContext extends object, TDefinition extends object> = [
     keyof TContext,
   ] extends [never]
-    ? (ctx?: never) => TPath<TPathTree, TDefinition>
-    : (ctx: Context<TContext>) => TPath<TPathTree, TDefinition>;
+    ? (ctx?: never) => Path<TTree, TDefinition>
+    : (ctx: Context<TContext>) => Path<TTree, TDefinition>;
 }
 
 /**
@@ -210,19 +195,19 @@ type TLeafFunction<TLeaf, TDefinition extends object> = tpath.DefinitionHelpers<
 > &
   (TLeaf extends (...args: infer TArgs) => infer TReturn ? (...args: TArgs) => TReturn : never);
 
-type _TPath<TPathTree, TDefinition extends object> = tpath.DefinitionHelpers<
+type PathProxy<TTree, TDefinition extends object> = tpath.DefinitionHelpers<
   ExtractDefinition<TDefinition>
 > &
-  (TPathTree extends (...args: any[]) => unknown
-    ? TLeafFunction<TPathTree, TDefinition>
-    : TPathTree extends object
-      ? { readonly [K in keyof TPathTree]: _TPath<TPathTree[K], TDefinition> }
+  (TTree extends (...args: any[]) => unknown
+    ? TLeafFunction<TTree, TDefinition>
+    : TTree extends object
+      ? { readonly [K in keyof TTree]: PathProxy<TTree[K], TDefinition> }
       : never);
 
 type ExtractDefinition<TDefinition extends object> = TDefinition;
 
-function createTPathDefiner<TPathTree, TContext extends object>(): tpath.Definer<
-  TPathTree,
+function createPathDefiner<TTree, TContext extends object>(): tpath.Definer<
+  TTree,
   TContext
 > {
   return {
@@ -236,20 +221,20 @@ function createTPathDefiner<TPathTree, TContext extends object>(): tpath.Definer
       };
 
       return ((ctx = {} as tpath.Context<TContext>) =>
-        createTPathProxy<TPathTree, TContext, TDefinition>(
+        createPathProxy<TTree, TContext, TDefinition>(
           runtimeDefinition,
           [],
           ctx,
-        )) as tpath.DefineResult<TPathTree, TContext, TDefinition>;
+        )) as tpath.DefineResult<TTree, TContext, TDefinition>;
     },
   };
 }
 
-function createTPathProxy<TPathTree, TContext extends object, TDefinition extends object>(
+function createPathProxy<TTree, TContext extends object, TDefinition extends object>(
   definition: RuntimeDefinition<TContext, TDefinition>,
   previousPath: readonly string[],
   ctx: tpath.Context<TContext>,
-): tpath.TPath<TPathTree, TDefinition> {
+): tpath.Path<TTree, TDefinition> {
   return new Proxy(() => undefined, {
     get(_target, key) {
       if (typeof key === 'symbol') {
@@ -270,12 +255,12 @@ function createTPathProxy<TPathTree, TContext extends object, TDefinition extend
           extension(createDefinitionContext(definition, previousPath, ctx), ...args);
       }
 
-      return createTPathProxy(definition, [...previousPath, key], ctx);
+      return createPathProxy(definition, [...previousPath, key], ctx);
     },
     apply(_target, _thisArg, argArray: unknown[]) {
       return resolveDefinition(definition, previousPath, ctx, argArray);
     },
-  }) as unknown as tpath.TPath<TPathTree, TDefinition>;
+  }) as unknown as tpath.Path<TTree, TDefinition>;
 }
 
 function resolveDefinition<TContext extends object, TDefinition extends object>(

@@ -11,12 +11,12 @@ describe("react-simple example", () => {
 
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "TPath Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "tpath Notes" })).toBeInTheDocument();
     expect(screen.getByLabelText("Note")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Language"), "ru");
 
-    expect(screen.getByRole("heading", { name: "Заметки TPath" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Заметки tpath" })).toBeInTheDocument();
     expect(screen.getByLabelText("Заметка")).toBeInTheDocument();
     expect(screen.getByText("Пока нет заметок")).toBeInTheDocument();
   });
@@ -26,7 +26,7 @@ describe("react-simple example", () => {
 
     render(<App initialLocale="en" />);
 
-    expect(screen.getByRole("heading", { name: "TPath Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "tpath Notes" })).toBeInTheDocument();
     expect(screen.getByText("No notes yet")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Note"), "Keep translations boring");
@@ -41,7 +41,7 @@ describe("react-simple example", () => {
 
     render(<App initialLocale="en" />);
 
-    expect(screen.getByRole("heading", { name: "TPath Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "tpath Notes" })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Show keys" }));
 
@@ -50,7 +50,7 @@ describe("react-simple example", () => {
 
     await user.click(screen.getByRole("button", { name: "app.debugToggle.hide" }));
 
-    expect(screen.getByRole("heading", { name: "TPath Notes" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "tpath Notes" })).toBeInTheDocument();
   });
 
   test("renders another nested translation tree with the same inferred type", async () => {
@@ -58,7 +58,7 @@ describe("react-simple example", () => {
 
     render(<App initialLocale="ru" />);
 
-    expect(screen.getByRole("heading", { name: "Заметки TPath" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Заметки tpath" })).toBeInTheDocument();
     expect(screen.getByText("Пока нет заметок")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Заметка"), "Проверить вложенные переводы");
@@ -79,7 +79,7 @@ describe("react-simple example", () => {
     const regular = createT({ debug: false, messages: en });
     const debug = createT({ debug: true, messages: en });
 
-    expect(regular.app.title()).toBe("TPath Notes");
+    expect(regular.app.title()).toBe("tpath Notes");
     expect(debug.app.title()).toBe("app.title");
   });
 });

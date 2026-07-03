@@ -94,6 +94,11 @@ test('types function leaves as user-defined path calls', () => {
   p.users.search(1);
 });
 
+test('does not export a function leaf alias', () => {
+  // @ts-expect-error function leaves should be ordinary function types
+  expectTypeOf<tpath.Leaf<[], string>>();
+});
+
 test('exports resolve function type for define callbacks', () => {
   type Resolve = tpath.DefinitionResolve<
     { readonly messages: Readonly<Record<string, string | undefined>> },
@@ -235,7 +240,7 @@ test('accepts context as the second tpath generic', () => {
 
 test('treats an empty factory context as no context argument', () => {
   type Factory = tpath.Factory<TranslationCalls, {}, {}>;
-  type T = tpath.TPath<TranslationCalls, {}>;
+  type T = tpath.Path<TranslationCalls, {}>;
 
   expectTypeOf<Factory>().toEqualTypeOf<(ctx?: never) => T>();
 });

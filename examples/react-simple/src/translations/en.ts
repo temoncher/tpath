@@ -20,6 +20,6 @@ export const en = {
       empty: "No notes yet",
       item: "{index}. {text}",
     },
-    title: "TPath Notes",
+    title: "tpath Notes",
   },
 } as const;

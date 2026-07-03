@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 
-import { tpath } from "../../../tpath.ts";
+import { tpath } from "tpath";
 import { en } from "./translations/en";
 import { formatMessage } from "./translations/formatMessage";
 import { ru } from "./translations/ru";

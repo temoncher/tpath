@@ -1,6 +1,6 @@
 import { IntlMessageFormat } from "intl-messageformat";
 
-import { tpath } from "../../../../tpath.ts";
+import { tpath } from "tpath";
 import type { TranslationPath } from "./TranslationPath";
 import type appEn from "../__translationMocks__/app.gen.ts";
 import type commitsEn from "../__translationMocks__/commits.gen.ts";

@@ -23,6 +23,6 @@ export const ru = {
       empty: "Пока нет заметок",
       item: "{index}. {text}",
     },
-    title: "Заметки TPath",
+    title: "Заметки tpath",
   },
 } as const satisfies Messages<typeof en>;
